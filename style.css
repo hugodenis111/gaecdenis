@@ -511,3 +511,14 @@ details.replier table { margin-top: 6px; }
 .actions-bete button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 14px; border: 1px solid var(--bord); background: var(--carte); box-shadow: var(--ombre); font-weight: 600; font-size: 14px; }
 .actions-bete .ms { color: var(--vert); font-size: 24px; }
 .actions-bete button:active { filter: brightness(.96); }
+
+/* 4.6 — Pointage d'un groupe de bêtes */
+.bloc.pointage { position: sticky; top: calc(var(--haut) + env(safe-area-inset-top) + var(--bandeau, 0px) + 6px); z-index: 5; border: 2px solid var(--vert); }
+.bloc.pointage > b { display: flex; align-items: center; gap: 8px; font-size: 17px; }
+.bloc.pointage > b .ms { color: var(--vert); }
+.bloc.pointage .doux { display: block; margin-top: 6px; font-size: 14px; }
+#liste-vaches button.en-pointage { gap: 10px; }
+#liste-vaches button.en-pointage::after { content: none !important; }
+#liste-vaches .coche .ms { font-size: 30px; color: var(--texte-faible); }
+#liste-vaches button.vue { background: var(--vert-clair); }
+#liste-vaches button.vue .coche .ms { color: var(--vert); font-variation-settings: "FILL" 1; }

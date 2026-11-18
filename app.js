@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.5
+/* Ferme Denis — appli famille (AGRIOS) — version 4.6
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -519,6 +519,11 @@
   ].map((f) => (f.test ? f : Object.assign(f, { test: (v) => typeBete(v) === f.id })));
   let filtreVaches = 'toutes';
   let triVaches = 'numero';
+  // Pointage d'un groupe : les bêtes vues sont gardées sur ce téléphone (pas envoyées à la ferme)
+  let modePointage = false;
+  const clePointage = (g) => 'ferme-denis-pointage-' + g;
+  function lirePointage(g) { try { const p = JSON.parse(localStorage.getItem(clePointage(g)) || 'null'); return p && p.vus ? p : { vus: {} }; } catch (e) { return { vus: {} }; } }
+  function ecrirePointage(g, p) { try { if (Object.keys(p.vus).length) localStorage.setItem(clePointage(g), JSON.stringify(p)); else localStorage.removeItem(clePointage(g)); } catch (e) { /* stockage plein */ } }
 
   async function vueVaches(el, options) {
     const [toutes, tr] = await Promise.all([lire('vaches'), lire('troupeau')]);
@@ -564,6 +569,7 @@
         <select id="tri-vaches" aria-label="Trier"><option value="numero">Par numéro</option><option value="age">Les plus jeunes</option><option value="vieilles">Les plus âgées</option></select>
       </div>
       <p class="doux" id="compte-vaches"></p>
+      <div id="barre-pointage"></div>
       <div class="bloc"><ul class="liste" id="liste-vaches"></ul></div>
       <p class="note">Inventaire EDE du 31/10/2026.</p>`;
 
@@ -593,13 +599,31 @@
       else if (triVaches === 'vieilles') liste.sort((x, y) => (y.age_mois ?? -1) - (x.age_mois ?? -1));
       else liste.sort((x, y) => String(x.numero_travail).localeCompare(String(y.numero_travail)));
       $('#compte-vaches', el).textContent = pluriel(liste.length, 'bête');
+      // Pointage (compter un groupe dans le bâtiment ou au champ) : on touche chaque bête vue ; gardé sur ce téléphone
+      const pt = lirePointage(filtreVaches);
+      const vues = liste.filter((v) => pt.vus[v.numero_national]).length;
+      $('#barre-pointage', el).innerHTML = filtreVaches === 'toutes' ? '' : modePointage
+        ? `<div class="bloc pointage"><b>${icone('fact_check')}Pointage : ${nf(vues)} vue${vues > 1 ? 's' : ''} sur ${nf(liste.length)}</b>
+            <span class="doux">Touche chaque bête que tu vois. ${liste.length - vues ? `Pas encore vues : ${esc(liste.filter((v) => !pt.vus[v.numero_national]).map((v) => v.numero_travail).join(', '))}.` : 'Tout le groupe est vu.'}</span>
+            <div class="boutons-ligne"><button class="bouton-principal" id="pointage-fini">${icone('check')}Terminer</button><button class="bouton-discret" id="pointage-zero">Tout effacer</button></div></div>`
+        : `<button class="bouton-secondaire large" id="pointage-debut" style="margin-bottom:10px">${icone('fact_check')}Pointer ce groupe (compter les bêtes)${Object.keys(pt.vus).length ? ` · reprendre (${nf(vues)} vues)` : ''}</button>`;
       $('#liste-vaches', el).innerHTML = liste.map((v) => `
-        <li><button data-num="${esc(v.numero_national)}">
+        <li><button data-num="${esc(v.numero_national)}" class="${modePointage ? 'en-pointage' + (pt.vus[v.numero_national] ? ' vue' : '') : ''}">
+          ${modePointage ? `<span class="coche">${icone(pt.vus[v.numero_national] ? 'check_circle' : 'radio_button_unchecked')}</span>` : ''}
           <span class="g"><b>${esc(v.numero_travail)} <span class="etiquette">${esc(MOT_TYPE[typeBete(v)])}</span></b>
           <span class="doux">${esc(age(v.age_mois))}${v.race ? ' · ' + esc(v.race) : ''}${v.nb_veaux_presents ? ' · ' + pluriel(v.nb_veaux_presents, 'veau') : ''}</span></span>
           <span class="d">${esc(v.groupe_actuel ? v.groupe_actuel.split(':')[0] : '')}</span>
         </button></li>`).join('') || '<li class="doux" style="padding:12px 0">Aucune bête ne correspond.</li>';
-      $$('#liste-vaches button', el).forEach((bt) => bt.addEventListener('click', () => ouvrirVache(bt.dataset.num)));
+      $$('#liste-vaches button', el).forEach((bt) => bt.addEventListener('click', () => {
+        if (!modePointage) { ouvrirVache(bt.dataset.num); return; }
+        const p = lirePointage(filtreVaches);
+        if (p.vus[bt.dataset.num]) delete p.vus[bt.dataset.num]; else p.vus[bt.dataset.num] = Date.now();
+        ecrirePointage(filtreVaches, p);
+        dessiner();
+      }));
+      const deb = $('#pointage-debut', el); if (deb) deb.addEventListener('click', () => { modePointage = true; dessiner(); });
+      const fin = $('#pointage-fini', el); if (fin) fin.addEventListener('click', () => { modePointage = false; dessiner(); });
+      const zero = $('#pointage-zero', el); if (zero) zero.addEventListener('click', () => { if (confirm('Effacer le pointage de ce groupe ?')) { ecrirePointage(filtreVaches, { vus: {} }); dessiner(); } });
     };
     champ.addEventListener('input', dessiner);
     $('#tri-vaches', el).addEventListener('change', (ev) => { triVaches = ev.target.value; dessiner(); });
