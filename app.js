@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.1
+/* Ferme Denis — appli famille (AGRIOS) — version 4.2
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -415,9 +415,19 @@
     blocMeteo($('#zone-meteo', el));
     $$('[data-lot-accueil]', el).forEach((b) => b.addEventListener('click', () => ouvrir('Lot', (x) => vueLot(x, b.dataset.lotAccueil))));
     // Alertes du suivi jour par jour (registre MyTR) des lots en cours
+    let releveSignale = false;
     lotsEnCours(tousLots).forEach((l) => lire('lot', { lot_id: l.lot_id }).then((detail) => {
       const s = suiviLot(l, detail);
       const fil = $('.fil-alertes', el);
+      // Le relevé MyTR du matin (tâche de 9 h sur le Mac) n'a pas tourné depuis plus d'un jour : on le dit
+      const releve = detail && detail.releves_le ? new Date(detail.releves_le) : null;
+      if (fil && releve && !isNaN(releve) && Date.now() - releve.getTime() > 26 * 3600000 && !releveSignale) {
+        releveSignale = true;
+        const r = document.createElement('div');
+        r.className = 'alerte-ligne attention';
+        r.innerHTML = `${icone('sync_problem')}<span class="txt"><b>Suivi des poulets pas à jour</b><span>Dernier relevé MyTR le ${esc(dateFr(String(detail.releves_le).slice(0, 10)))} : le relevé de 9 h n'a pas tourné (Mac éteint ?).</span></span>`;
+        fil.appendChild(r);
+      }
       if (!s || !s.d || !s.alertes.length || !fil) return;
       const b = document.createElement('button');
       b.className = 'alerte-ligne attention';
@@ -762,6 +772,12 @@
           ${veauxPartis.length ? chiffre(nbVeaux, nbVeaux > 1 ? 'veaux connus' : 'veau connu') : ''}
         </div>
       </div>
+      <div class="actions-bete" role="group" aria-label="Noter vite pour cette bête">
+        ${f.sexe === 'F' ? `<button data-action-bete="velage">${icone('child_friendly')}<span>Vêlage</span></button>` : ''}
+        <button data-action-bete="soin">${icone('healing')}<span>Soin</span></button>
+        <button data-action-bete="remarque">${icone('sticky_note_2')}<span>Remarque</span></button>
+        <button data-action-bete="a_faire">${icone('add_task')}<span>À faire</span></button>
+      </div>
 
       <div class="bloc">
         <h2>${icone('badge')}Identité</h2>
@@ -804,6 +820,11 @@
         <div class="doux">${esc(x.resume)}</div></li>`).join('')}</ul></div>`;
     }).catch(() => {});
     $('#ajouter-info-vache', el).addEventListener('click', () => noter({ atelier: 'bovins', numero_animal: f.numero_travail, libelle: 'N° ' + f.numero_travail }));
+    // Actions rapides : le formulaire s'ouvre déjà sur la bonne bête et le bon type
+    $$('[data-action-bete]', el).forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.actionBete === 'a_faire') ajouterAFaire(null, { atelier: 'bovins', texte: 'N° ' + f.numero_travail + ' : ' });
+      else noter({ atelier: 'bovins', numero_animal: f.numero_travail, libelle: 'N° ' + f.numero_travail, type: b.dataset.actionBete });
+    }));
     if (merePresente || merePartie) $('#voir-mere', el).addEventListener('click', () => ouvrirVache(merePresente ? f.mere_numero : merePartie.numero_national));
     $$('button[data-num]', el).forEach((bt) => bt.addEventListener('click', () => ouvrirVache(bt.dataset.num)));
   }
@@ -2571,7 +2592,8 @@
     o = o || {};
     const atelierDepart = ATELIERS_INFO.some((a) => a[0] === o.atelier) ? o.atelier : 'bovins';
     const etat = { atelier: atelierDepart, type: null, quand: 'auj', sexe: '', facilite: '' };
-    etat.type = ATELIERS_INFO.find((a) => a[0] === etat.atelier)[3][0];
+    const typesDepart = ATELIERS_INFO.find((a) => a[0] === etat.atelier)[3];
+    etat.type = o.type && typesDepart.includes(o.type) ? o.type : typesDepart[0];
     let enregistreAuMoinsUne = false, saisieEnCours = true;
     const f = feuille(`<div id="info-corps"></div>`, {
       // Ne pas perdre une saisie en touchant le fond par erreur

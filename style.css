@@ -505,3 +505,9 @@ details.replier table { margin-top: 6px; }
 .a-faire.retard .g .doux { color: var(--rouge); font-weight: 600; }
 .a-faire .retirer { flex: none; border: 0; background: none; color: var(--texte-faible); width: 40px; height: 40px; display: grid; place-items: center; padding: 0; }
 .boutons-ligne { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+
+/* 4.2 — Actions rapides sur la fiche d'une bête */
+.actions-bete { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; margin: -4px 0 14px; }
+.actions-bete button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 14px; border: 1px solid var(--bord); background: var(--carte); box-shadow: var(--ombre); font-weight: 600; font-size: 14px; }
+.actions-bete .ms { color: var(--vert); font-size: 24px; }
+.actions-bete button:active { filter: brightness(.96); }
