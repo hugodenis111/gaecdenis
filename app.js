@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.2
+/* Ferme Denis — appli famille (AGRIOS) — version 4.3
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -1315,7 +1315,7 @@
     const blocSuivi = !suivi ? '' : `<div class="bloc">
         <h2>${icone('monitoring')}Suivi jour par jour</h2>
         ${suivi.d && suivi.enCours ? `
-          <p class="doux" style="margin-top:0">Dernier jour complet : <b>jour ${nf(suivi.d.j)}</b> (${esc(dateFr(String(suivi.d.date).slice(0, 10)))})</p>
+          <p class="doux" style="margin-top:0">Dernier jour complet : <b>jour ${nf(suivi.d.j)}</b> (${esc(dateFr(String(suivi.d.date).slice(0, 10)))})${suivi.refs[suivi.d.j] && suivi.refs[suivi.d.j].n ? ` · comparé à ${pluriel(suivi.refs[suivi.d.j].n, 'lot')} d'avant du même poulailler au jour ${nf(suivi.d.j)}` : ''}</p>
           ${suivi.alertes.length ? `<div class="fil-alertes" style="margin-bottom:10px">${suivi.alertes.map((a) => `<div class="alerte-ligne attention">${icone('warning')}<span class="txt"><b>${esc(a)}</b></span></div>`).join('')}</div>` : ''}
           <div class="chiffres">
             ${suivi.d.eau != null ? `<div class="chiffre"><b>${nf(suivi.d.eau)} L</b><span>eau${suivi.eauMl != null ? ` · ${nf(suivi.eauMl)} ml/poulet` : ''}${suivi.ecarts.eau !== null ? `<br>${esc(texteEcart(suivi.ecarts.eau))} / lots d'avant` : ''}</span></div>` : ''}

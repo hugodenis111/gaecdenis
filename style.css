@@ -274,8 +274,8 @@ details.rubrique[open] > summary { margin-bottom: 8px; }
 .menu-plus { display: grid; gap: 8px; margin-bottom: 14px; }
 .menu-plus .alerte-ligne { background: var(--carte); border: 1px solid var(--bord); box-shadow: var(--ombre); }
 .menu-plus .alerte-ligne > .ms:last-child { width: auto; height: auto; background: none; color: var(--texte-faible); }
-.bouton-carte { width: 34px; height: 34px; border-radius: 8px; border: 2px solid rgba(0,0,0,.2); background: #fff; color: #1d2320; display: grid; place-items: center; cursor: pointer; padding: 0; }
-.bouton-carte .ms { font-size: 20px; }
+.bouton-carte { width: 44px; height: 44px; border-radius: 8px; border: 2px solid rgba(0,0,0,.2); background: #fff; color: #1d2320; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.bouton-carte .ms { font-size: 24px; }
 .legende-cultures { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 4px 0 6px; }
 .legende-cultures span { display: inline-flex; align-items: center; gap: 6px; }
 .legende-graph i.pointilles { height: 0; border-top: 2px dashed var(--texte-doux); border-radius: 0; vertical-align: 3px; }
