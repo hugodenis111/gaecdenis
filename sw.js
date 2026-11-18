@@ -1,5 +1,5 @@
 // Garde seulement les fichiers de l'appli (pas les données de la ferme) pour qu'elle s'ouvre vite.
-const CACHE = 'ferme-denis-v27';
+const CACHE = 'ferme-denis-v28';
 const FICHIERS = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'icon.svg', 'icon-512.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

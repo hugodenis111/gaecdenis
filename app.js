@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.3
+/* Ferme Denis — appli famille (AGRIOS) — version 4.4
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -301,9 +301,16 @@
   function agesHabituels(tousLots, production) {
     const r = tousLots.filter((x) => x.production === production && x.age_moyen_j != null).slice(0, 10);
     const moy = (k, liste) => { const v = (liste || r).map((x) => x[k]).filter((v) => v != null).map(Number); return v.length ? Math.round(v.reduce((s, a) => s + a, 0) / v.length) : null; };
-    // Les 3 départs habituels (2 de femelles, 1 de mâles) : derniers lots qui ont eu 3 départs
+    // Les 3 départs habituels (2 de femelles, 1 de mâles) : derniers lots qui ont eu 3 départs.
+    // Âge le plus courant (médiane) : un lot parti à 45 jours ne décale pas l'estimation (mâles à 43 jours le plus souvent).
+    const mediane = (k, liste) => {
+      const v = liste.map((x) => x[k]).filter((x) => x != null).map(Number).sort((a, b) => a - b);
+      if (!v.length) return null;
+      const m = Math.floor(v.length / 2);
+      return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
+    };
     const a3 = tousLots.filter((x) => x.production === production && Number(x.nb_departs) === 3 && x.depart_3_age_j != null).slice(0, 10);
-    const departs = a3.length >= 3 ? [moy('depart_1_age_j', a3), moy('depart_2_age_j', a3), moy('depart_3_age_j', a3)] : null;
+    const departs = a3.length >= 3 ? [mediane('depart_1_age_j', a3), mediane('depart_2_age_j', a3), mediane('depart_3_age_j', a3)] : null;
     return { moyen: moy('age_moyen_j'), femelles: moy('age_femelle_j'), males: moy('age_male_j'), departs, nbLots: a3.length };
   }
   const datePlusJours = (iso, j) => { const d = new Date(String(iso).slice(0, 10) + 'T12:00:00'); d.setDate(d.getDate() + j); return dateFr(d.toISOString().slice(0, 10), true); };
@@ -1298,7 +1305,7 @@
           <p class="note">Recopié des résultats d'abattage (Fermatel) ou des enlèvements de Maestro.</p></div>`
       : enCours && ah.departs ? `<div class="bloc"><h2>${icone('local_shipping')}Départs prévus</h2>
           ${ah.departs.map((j, i) => ligne(`<b>≈ ${esc(datePlusJours(l.date_mep, j))}</b> <span class="doux">· jour ${nf(j)}</span>`, esc(i === ah.departs.length - 1 ? 'mâles' : 'femelles'))).join('')}
-          <p class="note">Calcul : moyenne des ${nf(ah.nbLots)} derniers lots ${esc(l.production || '')} à 3 départs. Les vraies dates sont fixées avec Maestro.</p></div>` : '';
+          <p class="note">Calcul : âge le plus courant au départ sur les ${nf(ah.nbLots)} derniers lots ${esc(l.production || '')} à 3 départs (2 de femelles, puis les mâles). Les vraies dates sont fixées avec Maestro.</p></div>` : '';
 
     // Poussins mis en place et suivi jour par jour (registre MyTR)
     const nbMesure = (k) => { const m = ((detail && detail.mesures) || []).find((x) => x.indicateur === k); return m ? Number(m.valeur) : null; };
