@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.0
+/* Ferme Denis — appli famille (AGRIOS) — version 4.1
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -50,17 +50,82 @@
   // =====================================================================
   // Données
   // =====================================================================
+  // Hors réseau : la dernière réponse de chaque lecture est gardée sur le téléphone (cache du navigateur)
+  // et resservie, avec un bandeau, quand il n'y a pas de réseau (étable, champs). Effacée à la déconnexion.
+  const CACHE_DONNEES = 'ferme-denis-donnees-v1';
+  const urlDonnee = (cle) => new URL('__donnees/' + encodeURIComponent(cle), location.href).href;
+  const estErreurReseau = (e) => !navigator.onLine || /Failed to fetch|NetworkError|network|Load failed|fetch failed/i.test(String((e && (e.message || e.msg)) || e));
+  async function garderDonnee(cle, data) {
+    try {
+      const c = await caches.open(CACHE_DONNEES);
+      await c.put(urlDonnee(cle), new Response(JSON.stringify({ le: Date.now(), data }), { headers: { 'Content-Type': 'application/json' } }));
+    } catch (e) { /* stockage indisponible : tant pis, on lira en ligne */ }
+  }
+  async function relireDonnee(cle) {
+    try { const c = await caches.open(CACHE_DONNEES); const r = await c.match(urlDonnee(cle)); return r ? await r.json() : null; } catch (e) { return null; }
+  }
+  async function effacerDonneesGardees() { try { await caches.delete(CACHE_DONNEES); } catch (e) { /* rien à effacer */ } }
+  let horsLigneDepuis = null; // date de la plus ancienne donnée resservie sans réseau
+  function majBandeau() {
+    const b = $('#bandeau-reseau');
+    if (!b) return;
+    const attente = lireFile().length;
+    const morceaux = [];
+    if (horsLigneDepuis) morceaux.push(`Pas de réseau : tu vois les données gardées sur le téléphone (du ${new Date(horsLigneDepuis).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}).`);
+    if (attente) morceaux.push(`${pluriel(attente, 'info notée', 'infos notées')} sans réseau, ${attente > 1 ? 'envoyées' : 'envoyée'} dès que le réseau revient.`);
+    b.hidden = !morceaux.length;
+    $('.txt', b).textContent = morceaux.join(' ');
+    // Le contenu descend de la hauteur du bandeau pour ne rien cacher
+    document.documentElement.style.setProperty('--bandeau', b.hidden ? '0px' : b.offsetHeight + 'px');
+  }
   const cache = {};
   async function lire(quoi, params = {}) {
     const cle = quoi + JSON.stringify(params);
     if (cache[cle]) return cache[cle];
+    const secours = async (error) => {
+      if (estErreurReseau(error)) {
+        const g = await relireDonnee(cle);
+        if (g) { horsLigneDepuis = Math.min(horsLigneDepuis || Infinity, g.le); majBandeau(); return g.data; }
+      }
+      delete cache[cle];
+      throw error;
+    };
     const promesse = sb.rpc('famille_lire', { p_quoi: quoi, p_params: params }).then(({ data, error }) => {
-      if (error) { delete cache[cle]; throw error; }
+      if (error) return secours(error);
+      garderDonnee(cle, data);
       return data;
-    });
+    }, secours);
     cache[cle] = promesse;
     return promesse;
   }
+
+  // Infos notées sans réseau : gardées sur le téléphone puis envoyées dès que le réseau revient
+  const CLE_A_ENVOYER = 'ferme-denis-a-envoyer-v1';
+  function lireFile() { try { return JSON.parse(localStorage.getItem(CLE_A_ENVOYER) || '[]'); } catch (e) { return []; } }
+  function ecrireFile(l) { try { if (l.length) localStorage.setItem(CLE_A_ENVOYER, JSON.stringify(l)); else localStorage.removeItem(CLE_A_ENVOYER); } catch (e) { /* stockage plein */ } }
+  function mettreEnAttente(p) { const l = lireFile(); l.push({ p, le: Date.now() }); ecrireFile(l); majBandeau(); }
+  let envoiEnCours = false;
+  async function envoyerEnAttente() {
+    const l = lireFile();
+    if (envoiEnCours || !l.length || !navigator.onLine) return;
+    envoiEnCours = true;
+    const restants = [];
+    for (const x of l) {
+      try {
+        const { error } = await sb.rpc('famille_ajouter', { p_donnees: x.p });
+        if (error) restants.push(x);
+      } catch (e) { restants.push(x); }
+    }
+    ecrireFile(restants);
+    envoiEnCours = false;
+    if (restants.length < l.length) viderCache();
+    majBandeau();
+  }
+  // Le réseau revient : on envoie ce qui attend, et on recharge la page si elle montrait des données gardées
+  window.addEventListener('online', () => {
+    envoyerEnAttente();
+    if (horsLigneDepuis) { horsLigneDepuis = null; viderCache(); majBandeau(); if (vueCourante) afficher(vueCourante); }
+  });
   const viderCache = () => Object.keys(cache).forEach((k) => delete cache[k]);
   function prechargement() {
     return Promise.allSettled(['accueil', 'vaches', 'lots', 'champs', 'troupeau'].map((q) => lire(q)));
@@ -155,8 +220,8 @@
   // Pages qui s'ouvrent par-dessus un onglet (bouton retour)
   const PAGES = {
     sci: ['SCI', (el) => vueSci(el)], documents: ['Documents', (el) => vueDocuments(el)], batiments: ['Bâtiments', (el) => vueBatiments(el)],
-    taches: ['Tâches en cours', (el) => vueTaches(el)], journal: ['Journal des ateliers', (el) => vueJournal(el)], ajouts: ['Infos de la famille', (el) => vueAjouts(el)],
-    sources: ['Nos sources', (el) => vueSources(el)]
+    taches: ['Travail des assistants', (el) => vueTaches(el)], journal: ['Journal des ateliers', (el) => vueJournal(el)], ajouts: ['Infos de la famille', (el) => vueAjouts(el)],
+    sources: ['Nos sources', (el) => vueSources(el)], a_faire: ['À faire', (el) => vueAFaire(el)]
   };
   const brancher = (el) => {
     $$('[data-aller]', el).forEach((bt) => bt.addEventListener('click', () => allerOnglet(bt.dataset.aller, bt.dataset.options ? JSON.parse(bt.dataset.options) : undefined)));
@@ -248,7 +313,7 @@
     const pct = duree ? Math.min(100, Math.round((Number(l.age_j) / duree) * 100)) : null;
     const reste = duree ? duree - Number(l.age_j) : null;
     const enlevement = !l.date_mep || reste === null ? ''
-      : reste <= 0 ? ' · enlèvement en cours'
+      : reste <= 0 ? ` · date estimée du dernier départ passée (≈ ${datePlusJours(l.date_mep, duree)}) : départs pas encore relevés`
       : a.departs ? ` · départs ≈ ${datePlusJours(l.date_mep, a.departs[0])} et ${datePlusJours(l.date_mep, a.departs[1])} (femelles), ${datePlusJours(l.date_mep, a.departs[2])} (mâles)`
       : a.males && a.femelles ? ` · enlèvement ≈ ${datePlusJours(l.date_mep, a.femelles)} (femelles) et ${datePlusJours(l.date_mep, a.males)} (mâles)`
       : ` · enlèvement dans ~${reste} jours`;
@@ -312,9 +377,11 @@
              <span class="txt"><b>Troupeau : dernier contrôle EDE le ${esc(dateFr(dateVerifEde))}</b><span>Il y a ${nf(joursInventaire)} jours. Les naissances et sorties déclarées depuis n'y sont pas encore : il faut un nouveau contrôle EDE.</span></span></button>` : ''}
           ${ajouts.length ? `<button class="alerte-ligne attention" data-ouvrir="ajouts">${icone('edit_note')}
              <span class="txt"><b>${pluriel(ajouts.length, 'info ajoutée', 'infos ajoutées')} par la famille</b><span>Dernière : ${esc(ajouts[0].resume)} (${esc(ajouts[0].auteur)})</span></span></button>` : ''}
-          ${!lots.length && !ajouts.length && joursInventaire <= 14 ? `<div class="alerte-ligne info">${icone('check_circle')}<span class="txt"><b>Rien de particulier</b><span>Pas de lot en cours ni d'info nouvelle.</span></span></div>` : ''}
+          ${!lots.length && !ajouts.length && joursInventaire <= 14 ? `<div class="alerte-ligne info rien">${icone('check_circle')}<span class="txt"><b>Rien de particulier</b><span>Pas de lot en cours ni d'info nouvelle.</span></span></div>` : ''}
         </div>
       </div>
+
+      <div id="zone-a-faire"></div>
 
       <div class="raccourcis">
         <button class="raccourci" data-aller="vaches">${icone('pets')}<b>Troupeau</b><span>${nf(b.total)} bêtes</span></button>
@@ -344,6 +411,7 @@
       <p class="note pied">${Object.keys(nomsAteliers).filter((k) => maj[k]).length ? `À jour : ${Object.keys(nomsAteliers).filter((k) => maj[k]).map((k) => `${esc(nomsAteliers[k])} ${esc(dateFr(maj[k], true))}`).join(' · ')}<br>` : ''}Ferme Denis · version ${esc(C.version)}</p>`;
     brancher(el);
     $('#accueil-chercher', el).addEventListener('click', ouvrirRecherche);
+    blocAFaireAccueil($('#zone-a-faire', el));
     blocMeteo($('#zone-meteo', el));
     $$('[data-lot-accueil]', el).forEach((b) => b.addEventListener('click', () => ouvrir('Lot', (x) => vueLot(x, b.dataset.lotAccueil))));
     // Alertes du suivi jour par jour (registre MyTR) des lots en cours
@@ -358,7 +426,19 @@
       fil.prepend(b);
     }).catch(() => {}));
     $$('[data-carte-code]', el).forEach((bt) => bt.addEventListener('click', () => allerOnglet('carte', { code: bt.dataset.carteCode })));
-
+    // Troupeau : bêtes à regarder côté vêlages (calcul de l'appli sur les données EDE)
+    lire('troupeau').then((tr) => {
+      const n = tr && tr.velages ? betesARegarder(tr.velages).length : 0;
+      const fil = $('.fil-alertes', el);
+      if (!n || !fil) return;
+      const rien = $('.alerte-ligne.rien', fil);
+      if (rien) rien.remove();
+      const bt = document.createElement('button');
+      bt.className = 'alerte-ligne info';
+      bt.innerHTML = `${icone('child_friendly')}<span class="txt"><b>Troupeau : ${pluriel(n, 'bête')} à regarder</b><span>Long écart entre 2 vêlages, ou génisse âgée sans veau connu.</span></span>`;
+      bt.addEventListener('click', () => allerOnglet('vaches', { velages: true }));
+      fil.appendChild(bt);
+    }).catch(() => {});
 
     const fermerBienvenue =() => { try { localStorage.setItem(CLE_BIENVENUE, '1'); } catch (e) { /* stockage indisponible */ } };
     const bFermer = $('.fermer-bienvenue', el);
@@ -437,6 +517,8 @@
         <p class="note">Veaux nés sur la ferme, y compris ceux déjà partis (historique EDE des mouvements). Les bêtes achetées ne comptent pas.</p>
       </div>` : ''}
 
+      ${tr.velages ? blocVelages(tr.velages) : ''}
+
       <div class="bloc" id="bloc-sorties"><h2>${icone('logout')}Bêtes parties</h2><p class="doux" style="margin:0">Chargement de l'historique EDE…</p></div>
 
       <div class="bloc">
@@ -462,6 +544,7 @@
         $('#detail-naissances', el).textContent = `${moisLong(p.cle)} : ${pluriel(p.valeur, 'veau')} (${p.f} femelle${p.f > 1 ? 's' : ''}, ${p.m} mâle${p.m > 1 ? 's' : ''})${p.partis ? ` · ${p.partis} déjà parti${p.partis > 1 ? 's' : ''}` : ''}`;
       }));
     }
+    if (options && options.velages) setTimeout(() => { const b = $('#bloc-velages', el); if (b) b.scrollIntoView({ block: 'start' }); }, 50);
     // Bêtes parties : chargé à part (l'historique EDE est plus lourd), la page s'affiche sans attendre
     lire('sorties').then((s) => {
       dessinerSorties($('#bloc-sorties', el), s);
@@ -542,6 +625,46 @@
   const ligneVeauPresent = (v) => `
     <li><button data-num="${esc(v.numero_national || v.numero_travail)}"><span class="g"><b>${esc(v.numero_travail)}</b>
     <span class="doux">${esc(sexe(v.sexe))} · ${v.sexe === 'F' ? 'née' : 'né'} le ${esc(dateFr(v.date_naissance))}</span></span></button></li>`;
+  // Vêlages du troupeau (calcul de l'appli sur les données EDE) : intervalle, âge au 1er vêlage, veaux morts, bêtes à regarder
+  function betesARegarder(v) {
+    return [
+      ...(v.ivv_longs || []).map((x) => ({ n: x.national, t: x.numero, txt: `${nf(x.jours)} jours entre ses 2 derniers vêlages (dernier le ${dateFr(x.dernier)})` })),
+      ...(v.sans_velage_12_mois || []).map((x) => ({ n: x.national, t: x.numero, txt: x.dernier ? `dernier vêlage connu il y a ${nf(x.jours)} jours (le ${dateFr(x.dernier)})` : 'aucun veau connu (inventaire et historique EDE depuis 2017)' })),
+      ...(v.genisses_36_mois || []).map((x) => ({ n: x.national, t: x.numero, txt: `génisse de ${nf(x.age_mois)} mois, aucun veau connu : à vérifier (historique incomplet)` }))];
+  }
+  function blocVelages(v) {
+    const mort = v.mortalite || [];
+    const anCourant = new Date().getFullYear();
+    const derniereEntiere = mort.find((m) => m.annee < anCourant);
+    const pct = (m) => (m && m.nes ? (100 * m.morts_6_mois) / m.nes : null);
+    const aRegarder = betesARegarder(v);
+    return `<div class="bloc" id="bloc-velages">
+      <h2>${icone('child_friendly')}Vêlages</h2>
+      <div class="chiffres trois">
+        <div class="chiffre"><b>${nf(v.ivv_moyen)} j</b><span>entre 2 vêlages, en moyenne</span></div>
+        <div class="chiffre"><b>${nf(v.age_premier_velage_mois, 0)} mois</b><span>âge au 1er vêlage</span></div>
+        <div class="chiffre"><b>${derniereEntiere ? nf(pct(derniereEntiere), 0) + ' %' : '—'}</b><span>veaux morts avant 6 mois${derniereEntiere ? ' en ' + derniereEntiere.annee : ''}</span></div>
+      </div>
+      <p class="doux" style="margin:8px 0 0">Intervalle calculé sur ${pluriel(v.ivv_nb, 'vache')} qui ont eu 2 veaux ou plus ces 2 dernières années ; la moitié est sous ${nf(v.ivv_median)} jours. Repère courant : un veau par vache et par an, soit environ 365 jours.</p>
+      ${aRegarder.length ? `<h3>À regarder (${nf(aRegarder.length)})</h3><ul class="liste">${aRegarder.map((x) => `
+        <li><button data-num="${esc(x.n)}"><span class="g"><b>${esc(x.t)}</b><span class="doux">${esc(x.txt)}</span></span></button></li>`).join('')}</ul>
+        <p class="doux" style="margin:4px 0 0">Plus de 15 mois entre 2 vêlages : vêlage manqué, ou veau mort-né sans numéro. À vérifier avec le carnet.</p>` : ''}
+      ${mort.length ? `<details class="replier"><summary>Veaux morts, année par année</summary>
+        <table><thead><tr><th>Année</th><th>Nés</th><th>Morts 48 h</th><th>Morts &lt; 6 mois</th><th>%</th></tr></thead><tbody>
+        ${mort.map((m) => `<tr><td>${esc(m.annee)}${m.annee >= anCourant ? '<br><span class="doux">en cours</span>' : ''}</td><td>${nf(m.nes)}</td><td>${nf(m.morts_48h)}</td><td>${nf(m.morts_6_mois)}</td><td>${nf(pct(m), 0)} %</td></tr>`).join('')}
+        </tbody></table></details>` : ''}
+      <p class="note">${esc(v.source)}</p>
+    </div>`;
+  }
+  // Résumé des vêlages d'une vache, à partir de ses veaux encore là et de ceux déjà partis
+  function ligneVelages(veaux, veauxPartis) {
+    const dates = Array.from(new Set((veaux || []).concat(veauxPartis || []).map((v) => String(v.date_naissance || '').slice(0, 10)).filter(Boolean))).sort();
+    if (!dates.length) return '';
+    const ecarts = dates.slice(1).map((d, i) => Math.round((new Date(d + 'T12:00:00') - new Date(dates[i] + 'T12:00:00')) / 86400000));
+    const dernier = dates[dates.length - 1];
+    const moy = ecarts.length ? ecarts.reduce((s, x) => s + x, 0) / ecarts.length : null;
+    return ligne('Vêlages connus', `${nf(dates.length)} · dernier le ${esc(dateFr(dernier))}<br><span class="doux">il y a ${nf(joursDepuis(dernier))} jours${ecarts.length ? ` · ${nf(ecarts[ecarts.length - 1])} j depuis le précédent · moyenne ${nf(moy)} j` : ''}</span>`);
+  }
   // La mère : encore là, partie (avec sa sortie), ou inconnue de l'historique
   function ligneMere(numeroMere, merePresente, merePartie) {
     if (!numeroMere) return ligne('Mère', '—');
@@ -652,6 +775,7 @@
         <h2>${icone('family_restroom')}Famille</h2>
         ${ligneMere(f.mere_numero, merePresente, merePartie)}
         ${ligne('Père', esc(f.pere_numero || 'non indiqué'))}
+        ${ligneVelages(veaux, veauxPartis)}
         ${veaux.length ? `<h3>Veaux encore au troupeau</h3><ul class="liste">${veaux.map(ligneVeauPresent).join('')}</ul>` : ''}
         ${veauxPartis.length ? `<h3>Veaux déjà partis</h3><ul class="liste">${veauxPartis.map(ligneVeauParti).join('')}</ul>` : ''}
       </div>
@@ -718,6 +842,7 @@
         <h2>${icone('family_restroom')}Famille</h2>
         ${ligneMere(f.mere_numero, x.mere_presente, x.mere_partie)}
         ${ligne('Père', esc(f.pere_numero || 'non indiqué'))}
+        ${ligneVelages(veaux, veauxPartis)}
         ${veaux.length ? `<h3>Veaux encore au troupeau</h3><ul class="liste">${veaux.map(ligneVeauPresent).join('')}</ul>` : ''}
         ${veauxPartis.length ? `<h3>Veaux déjà partis</h3><ul class="liste">${veauxPartis.map(ligneVeauParti).join('')}</ul>` : ''}
       </div>
@@ -790,7 +915,8 @@
     ['Bêtes parties (ventes, boucherie, morts)', 'logout', 'parties partis sorties sortie ventes vente vendues vendus boucherie mortes morts equarrissage historique ede', () => allerOnglet('vaches', { sorties: true })],
     ['Volailles', 'egg_alt', 'volailles poulets poulet lots lot poulailler marge ic mortalite', () => allerOnglet('volailles')],
     ['Infos notées par la famille', 'edit_note', 'infos notes noter remarque remarques', () => ouvrir(PAGES.ajouts[0], PAGES.ajouts[1])],
-    ['Tâches en cours', 'checklist', 'taches tache a faire', () => ouvrir(PAGES.taches[0], PAGES.taches[1])],
+    ['À faire (liste de la famille)', 'checklist', 'a faire liste taches tache travaux boulot todo', () => ouvrir(PAGES.a_faire[0], PAGES.a_faire[1])],
+    ['Travail des assistants (Claude, GPT)', 'smart_toy', 'assistants claude gpt ia taches en cours ateliers', () => ouvrir(PAGES.taches[0], PAGES.taches[1])],
     ['Nos sources', 'hub', 'sources source site sites maestro mytr ede telepac fermatel pac registre origine chiffres banque compta msa', () => ouvrir(PAGES.sources[0], PAGES.sources[1])]
   ];
 
@@ -806,7 +932,7 @@
     champ.value = derniereRecherche;
     if (!derniereRecherche) champ.focus();
 
-    const r = await Promise.allSettled([lire('vaches'), lire('champs'), lire('lots'), lire('batiments'), lire('documents', {}), lire('ajouts', { nombre: 100 }), lire('carte'), lire('sorties')]);
+    const r = await Promise.allSettled([lire('vaches'), lire('champs'), lire('lots'), lire('batiments'), lire('documents', {}), lire('ajouts', { nombre: 100 }), lire('carte'), lire('sorties'), lire('cultures')]);
     const val = (i) => (r[i].status === 'fulfilled' ? r[i].value : null);
     const vaches = val(0) || [], champs = val(1) || [], lots = val(2) || [], bats = (val(3) && val(3).liste) || [];
     const docs = val(4) || [], ajouts = (val(5) || []).filter((x) => x.statut !== 'annule');
@@ -845,6 +971,25 @@
     champs.forEach((c) => (c.cultures || []).forEach((k) => { if (k.code && !cultures.has(k.code)) cultures.set(k.code, k.culture); }));
     enTerre.forEach((p) => { if (p.code_culture && !cultures.has(p.code_culture)) cultures.set(p.code_culture, p.culture); });
     cultures.forEach((nom, code) => ajouter('Sur la carte', 'map', `Voir « ${nom} » sur la carte`, 'en jaune sur la photo', code, () => allerOnglet('carte', { code })));
+    // Numéros PAC (îlot.parcelle, ex. « 80.4 ») : ouvre le champ s'il est connu, sinon la carte centrée dessus
+    const champParNom = new Map(champs.map((c) => [sansAccents(c.nom), c]));
+    ((val(8) && val(8).parcelles) || []).forEach((p) => {
+      if (!p.ilot || !p.numero_parcelle) return;
+      const ref = `${p.ilot}.${p.numero_parcelle}`;
+      const ch = champParNom.get(sansAccents(p.parcelle));
+      ajouter('Champs', 'tag', `PAC ${ref} · ${majuscule(p.parcelle || '')}`, `${p.culture || ''}${p.surface_ha ? ' · ' + nf(p.surface_ha, 2) + ' ha' : ''} · déclaration PAC ${val(8).annee || ''}`,
+        `${ref} ${p.ilot}-${p.numero_parcelle} ilot ${p.ilot} parcelle ${p.numero_parcelle} pac telepac`,
+        () => (ch ? ouvrirChamp(ch.parcelle_id) : allerOnglet('carte', { cible: { nom: p.parcelle } })), ref);
+    });
+    // Sapinières, terres du GAEC, propriétés : noms avec références cadastrales (ex. « H 1021 », « D 116 »)
+    const COUCHES_CHERCHEES = { sapinieres: ['forest', 'Sapinière'], terres_gaec: ['landscape', 'Terre du GAEC'], proprietes_famille: ['home_work', 'Propriété de la famille'] };
+    ((val(6) && val(6).features) || []).forEach((f) => {
+      const p = f.properties || {};
+      const c = COUCHES_CHERCHEES[p.couche];
+      if (!c || !p.nom) return;
+      ajouter('Sur la carte', c[0], majuscule(p.nom), [c[1], p.surface_m2 ? surfaceTexte(p.surface_m2) : '', p.statut === 'projet' ? 'projet' : ''].filter(Boolean).join(' · '),
+        `${p.couche} ${c[1]} cadastre sapin sapins ${String(p.nom).replace(/\s+/g, "")}`, () => allerOnglet('carte', { cible: { nom: p.nom, couche: p.couche } }));
+    });
     lots.forEach((l) => {
       const fini = l.poids_moyen_kg != null;
       ajouter('Lots de volailles', 'egg_alt', `${batNom(l.batiment)} · ${dateFr(l.date_mep)}`,
@@ -1115,7 +1260,7 @@
     // Lots d'avant de la même production, ce lot toujours en dernier (même si l'autre poulailler a démarré le même jour)
     const serie = lots.filter((x) => x.production === l.production && x.poids_moyen_kg != null && x.date_mep && l.date_mep
         && (x.date_mep < l.date_mep || x.lot_id === l.lot_id))
-      .sort((a, b) => (a.date_mep < b.date_mep ? -1 : a.date_mep > b.date_mep ? 1 : 0)).slice(-12);
+      .sort((a, b) => (a.date_mep < b.date_mep ? -1 : a.date_mep > b.date_mep ? 1 : 0)).slice(-11); // ce lot + les 10 d'avant (mêmes lots que le tableau)
     const dateEnlevement = !l.date_fin && l.date_mep && l.age_moyen_j != null
       ? new Date(new Date(l.date_mep + 'T12:00:00').getTime() + Number(l.age_moyen_j) * 86400000).toISOString().slice(0, 10) : null;
     const SOURCES_CHIFFRES = { extrait_du_bilan_non_valide: 'bilans Fermatel', extrait_rubrique_maestro_non_valide: 'rubriques Maestro' };
@@ -1188,7 +1333,7 @@
         ${effectif ? ligne('Poussins mis en place', `${nf(effectif)}${males && femelles ? `<br><span class="doux">${nf(males)} mâles, ${nf(femelles)} femelles</span>` : ''}`) : ''}
         ${departs.length ? ligne('Enlèvement', `${departs.length > 1 ? esc(dateFr(departs[0].date, true)) + ' → ' : ''}${esc(dateFr(departs[departs.length - 1].date))}<br><span class="doux">${pluriel(departs.length, 'départ')} à l'abattoir</span>`)
           : l.date_fin ? ligne('Enlèvement', esc(dateFr(l.date_fin)))
-          : enCours ? ligne('Enlèvement', ah.departs ? `≈ ${esc(datePlusJours(l.date_mep, ah.departs[0]))} → ${esc(datePlusJours(l.date_mep, ah.departs[ah.departs.length - 1]))}<br><span class="doux">estimation, voir les départs prévus</span>` : 'en cours')
+          : enCours ? ligne('Enlèvement', ah.departs ? `≈ ${esc(datePlusJours(l.date_mep, ah.departs[0]))} → ${esc(datePlusJours(l.date_mep, ah.departs[ah.departs.length - 1]))}<br><span class="doux">${joursDepuis(l.date_mep) > ah.departs[ah.departs.length - 1] ? 'date estimée passée : départs pas encore relevés' : 'estimation, voir les départs prévus'}</span>` : 'pas d\'estimation')
           : dateEnlevement ? ligne('Enlèvement', `≈ ${esc(dateFr(dateEnlevement))}<br><span class="doux">calcul : mise en place + ${nf(l.age_moyen_j)} jours</span>`) : ''}
         ${l.animaux_vendus != null ? ligne('Animaux vendus', nf(l.animaux_vendus)) : ''}
       </div>
@@ -1428,7 +1573,7 @@
       <button class="bouton-secondaire large" id="champ-carte">${icone('map')}Voir sur la grande carte</button>`;
     $('#info-champ', el).addEventListener('click', () => noter({ atelier: 'cultures', parcelle: majuscule(c.nom), libelle: majuscule(c.nom) }));
     blocDocuments($('#docs-champ', el), { type: 'champ', id: String(id), libelle: majuscule(c.nom), vide: 'Analyse de terre, plan d\'épandage, photo : ajoute-les ici.' });
-    $('#champ-carte', el).addEventListener('click', () => allerOnglet('carte', {}));
+    $('#champ-carte', el).addEventListener('click', () => allerOnglet('carte', { cible: { nom: c.nom, geometrie: c.geometrie || null } }));
     if (c.geometrie) {
       setTimeout(() => {
         const m = L.map('mini-carte', { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false });
@@ -1495,6 +1640,7 @@
 
   // Culture mise en avant sur la carte (en jaune vif, les autres en pâle)
   let cultureEnAvant = null;
+  let calqueCible = null; // contour jaune de l'endroit qu'on veut montrer (un champ, une sapinière…)
   const JAUNE_EN_AVANT = '#ffd60a';
   function styleCulture(p) {
     if (!cultureEnAvant) return { color: '#ffffff', weight: 1.2, fillColor: couleurCulture(p.code_culture), fillOpacity: 0.6, opacity: 0.9 };
@@ -1585,6 +1731,27 @@
       couchesVisibles[nom] = cb.checked;
       if (cb.checked) calquesCouches[nom].calque.addTo(carte); else carte.removeLayer(calquesCouches[nom].calque);
     }));
+
+    // Un endroit précis à montrer (fiche d'un champ, recherche « 80.4 », « D 116 »…) : contour jaune épais et carte centrée dessus
+    if (calqueCible) { carte.removeLayer(calqueCible); calqueCible = null; }
+    if (opts.cible) {
+      const ci = opts.cible;
+      let geo = ci.geometrie || null;
+      const f = !geo && ci.nom ? fc.features.find((x) => x.properties.nom === ci.nom && (!ci.couche || x.properties.couche === ci.couche)) : null;
+      if (f) {
+        geo = f.geometry;
+        const nomC = f.properties.couche;
+        if (calquesCouches[nomC] && !couchesVisibles[nomC]) {
+          couchesVisibles[nomC] = true; calquesCouches[nomC].calque.addTo(carte);
+          const cb = $(`[data-couche="${nomC}"]`, panneau); if (cb) cb.checked = true;
+        }
+      }
+      if (geo) {
+        calqueCible = L.geoJSON(geo, { style: { color: '#ffd60a', weight: 5, fill: true, fillColor: '#ffd60a', fillOpacity: 0.12 }, interactive: false }).addTo(carte);
+        const b = calqueCible.getBounds();
+        if (b.isValid()) { carte.fitBounds(b, { paddingTopLeft: [30, 30], paddingBottomRight: [30, panneau.offsetHeight + 30], maxZoom: 17 }); return; }
+      }
+    }
 
     let limites = null;
     const etendre = (b) => { if (b && b.isValid()) limites = limites ? limites.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast()); };
@@ -1787,7 +1954,8 @@
         ${[['sci', 'real_estate_agent', 'SCI', 'Maisons de location, baux, loyers, papiers'],
            ['documents', 'folder_open', 'Tous les documents', 'Photos, factures, papiers ajoutés par la famille'],
            ['batiments', 'home_work', 'Bâtiments', 'Poulaillers, porcheries, étable, maisons'],
-           ['taches', 'checklist', 'Tâches en cours', 'Ce qui reste à faire, par atelier'],
+           ['a_faire', 'checklist', 'À faire', 'La liste de la famille : quoi, pour qui, pour quand'],
+           ['taches', 'smart_toy', 'Travail des assistants', 'Ce que Claude et GPT ont encore à faire, par atelier'],
            ['journal', 'menu_book', 'Journal des ateliers', 'Ce qui a été fait et vérifié'],
            ['ajouts', 'edit_note', 'Infos ajoutées par la famille', 'Vêlages, soins, loyers, remarques…'],
            ['sources', 'hub', 'Nos sources', 'D\'où viennent les chiffres : sites, papiers, ce qui manque']]
@@ -1829,7 +1997,9 @@
       bt.innerHTML = echec ? icone('error') + esc(messageErreur(echec.reason)) : icone('check') + 'Données rechargées';
     });
     $('#plus-sortir', el).addEventListener('click', async () => {
-      if (!confirm('Se déconnecter de l\'appli sur ce téléphone ?')) return;
+      await envoyerEnAttente();
+      const restent = lireFile().length;
+      if (!confirm(restent ? `${pluriel(restent, 'info notée', 'infos notées')} sans réseau ${restent > 1 ? 'ne sont' : 'n\'est'} pas encore ${restent > 1 ? 'parties' : 'partie'} et ${restent > 1 ? 'seront perdues' : 'sera perdue'}. Se déconnecter quand même ?` : 'Se déconnecter de l\'appli sur ce téléphone ?')) return;
       await sb.auth.signOut();
       montrerConnexion();
     });
@@ -2138,6 +2308,132 @@
     return { el: $('.feuille', fond), fermer };
   }
 
+  // =====================================================================
+  // À faire : la liste partagée de la famille (travaux de la ferme : quoi, pour qui, pour quand)
+  // =====================================================================
+  async function aFaire(action, p) {
+    const { data, error } = await sb.rpc('famille_a_faire_gerer', { p_action: action, p });
+    if (error) throw error;
+    return data;
+  }
+  const oublierAFaire = () => Object.keys(cache).filter((k) => k.startsWith('a_faire')).forEach((k) => delete cache[k]);
+  const ATELIERS_A_FAIRE = [['bovins', 'Troupeau', 'pets'], ['volailles', 'Volailles', 'egg_alt'], ['cultures', 'Champs', 'grass'], ['batiments', 'Bâtiments', 'home_work'], ['sci', 'SCI', 'real_estate_agent'], ['autre', 'Autre', 'more_horiz']];
+  function texteEcheance(t) {
+    if (!t.echeance) return '';
+    const reste = -joursDepuis(t.echeance);
+    if (t.fait) return 'prévu le ' + dateFr(t.echeance, true);
+    if (reste < 0) return `en retard de ${pluriel(-reste, 'jour')}`;
+    if (reste === 0) return "pour aujourd'hui";
+    if (reste === 1) return 'pour demain';
+    return 'pour le ' + dateFr(t.echeance, true);
+  }
+  function ligneAFaire(t) {
+    const retard = !t.fait && t.echeance && joursDepuis(t.echeance) > 0;
+    const atelier = t.atelier ? (ATELIERS_A_FAIRE.find((a) => a[0] === t.atelier) || [])[1] : '';
+    const meta = [t.pour ? (t.pour === 'tous' ? 'tout le monde' : 'pour ' + t.pour) : '', texteEcheance(t), atelier,
+      t.fait ? (t.fait_par ? 'fait par ' + t.fait_par : 'fait') : (t.auteur ? 'noté par ' + t.auteur : '')].filter(Boolean).join(' · ');
+    return `<li class="a-faire${t.fait ? ' fait' : ''}${retard ? ' retard' : ''}">
+      <button class="case" data-cocher="${esc(t.id)}" data-fait="${t.fait ? '1' : ''}" aria-label="${t.fait ? 'Remettre à faire' : 'Marquer comme fait'}">${icone(t.fait ? 'check_circle' : 'radio_button_unchecked')}</button>
+      <span class="g"><b>${esc(t.texte)}</b>${meta ? `<span class="doux">${esc(meta)}</span>` : ''}</span>
+      ${t.a_moi ? `<button class="retirer" data-retirer="${esc(t.id)}" aria-label="Retirer de la liste">${icone('close')}</button>` : ''}
+    </li>`;
+  }
+  function brancherAFaire(zone, apres) {
+    $$('[data-cocher]', zone).forEach((b) => b.addEventListener('click', async () => {
+      const fait = !b.dataset.fait;
+      b.disabled = true;
+      b.closest('.a-faire').classList.toggle('fait', fait);
+      try { await aFaire('cocher', { id: b.dataset.cocher, fait }); oublierAFaire(); apres(); }
+      catch (e) { b.disabled = false; b.closest('.a-faire').classList.toggle('fait', !fait); alert(messageErreur(e)); }
+    }));
+    $$('[data-retirer]', zone).forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Retirer cette ligne de la liste ?')) return;
+      try { await aFaire('retirer', { id: b.dataset.retirer }); oublierAFaire(); apres(); } catch (e) { alert(messageErreur(e)); }
+    }));
+  }
+  // Petit formulaire « Ajouter à faire »
+  async function ajouterAFaire(apres, depart) {
+    let infos = {};
+    try { infos = await lire('a_faire'); } catch (e) { /* liste des personnes par défaut */ }
+    const personnes = (infos.personnes && infos.personnes.length ? infos.personnes : ['Hugo', 'Hervé', 'Evan']);
+    const etat = { pour: '', quand: '', atelier: (depart && depart.atelier) || '' };
+    const isoJ = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const choix = (nom, liste, actif) => `<div class="puces puces-info" data-groupe="${nom}">${liste.map(([v, l]) => `<button type="button" class="puce${v === actif ? ' actif' : ''}" data-v="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
+    let ecrit = false;
+    const f = feuille(`<div id="af-corps"></div>`, { avantFermer: () => !ecrit || !$('#af-texte') || !$('#af-texte').value.trim() || confirm('Fermer sans ajouter ? Ce que tu as écrit sera perdu.') });
+    const corps = $('#af-corps', f.el);
+    const dessiner = () => {
+      const texte = $('#af-texte', corps) ? $('#af-texte', corps).value : ((depart && depart.texte) || '');
+      const date = $('#af-date', corps) ? $('#af-date', corps).value : '';
+      corps.innerHTML = `<h2 class="feuille-titre">Ajouter à faire</h2>
+        <label for="af-texte">Quoi ?</label>
+        <textarea id="af-texte" class="champ-texte" rows="2" maxlength="300" placeholder="ex. Changer la bâche du silo · appeler le véto pour la 1142">${esc(texte)}</textarea>
+        <label>Pour qui ?</label>
+        ${choix('pour', [['', 'Personne en particulier']].concat(personnes.map((p) => [p, p])).concat([['tous', 'Tout le monde']]), etat.pour)}
+        <label>Pour quand ?</label>
+        ${choix('quand', [['', 'Pas de date'], ['0', "Aujourd'hui"], ['1', 'Demain'], ['7', 'Dans la semaine'], ['autre', 'Un jour précis']], etat.quand)}
+        ${etat.quand === 'autre' ? `<input id="af-date" type="date" value="${esc(date)}" min="${isoJ(new Date())}">` : ''}
+        <label>Atelier <span class="doux">(facultatif)</span></label>
+        ${choix('atelier', [['', 'Aucun']].concat(ATELIERS_A_FAIRE.map((a) => [a[0], a[1]])), etat.atelier)}
+        <button class="bouton-principal" id="af-ok" style="width:100%;margin-top:14px">${icone('add')}Ajouter à la liste</button>
+        <p class="erreur" id="af-erreur"></p>
+        <p class="note">Toute la famille voit la liste. Chacun peut cocher ce qui est fait ; seule la personne qui a écrit une ligne peut la retirer.</p>`;
+      $$('.puces-info', corps).forEach((g) => $$('.puce', g).forEach((b) => b.addEventListener('click', () => { ecrit = true; etat[g.dataset.groupe] = b.dataset.v; dessiner(); })));
+      $('#af-texte', corps).addEventListener('input', () => { ecrit = true; });
+      $('#af-ok', corps).addEventListener('click', async () => {
+        const t = $('#af-texte', corps).value.trim();
+        const err = $('#af-erreur', corps);
+        if (!t) { err.textContent = 'Écris ce qu\'il y a à faire.'; $('#af-texte', corps).focus(); return; }
+        let echeance = null;
+        if (etat.quand === 'autre') { echeance = ($('#af-date', corps) || {}).value || null; if (!echeance) { err.textContent = 'Choisis la date, ou « Pas de date ».'; return; } }
+        else if (etat.quand !== '') { const d = new Date(); d.setDate(d.getDate() + Number(etat.quand)); echeance = isoJ(d); }
+        const bt = $('#af-ok', corps); bt.disabled = true; bt.innerHTML = icone('hourglass_top') + 'Ajout…';
+        try {
+          await aFaire('ajouter', { texte: t, pour: etat.pour || null, echeance, atelier: etat.atelier || null });
+          oublierAFaire(); ecrit = false; f.fermer(); if (apres) apres();
+        } catch (e) { bt.disabled = false; bt.innerHTML = icone('add') + 'Ajouter à la liste'; err.textContent = messageErreur(e); }
+      });
+    };
+    dessiner();
+    setTimeout(() => { const z = $('#af-texte', corps); if (z && !z.value) z.focus(); }, 250);
+  }
+  // Page complète « À faire »
+  let filtreAFaire = 'reste';
+  async function vueAFaire(el) {
+    const r = await lire('a_faire');
+    const liste = (r && r.liste) || [];
+    const moi = (r && r.moi) || '';
+    const FILTRES = [['reste', 'À faire', (t) => !t.fait], ['moi', 'Pour moi', (t) => !t.fait && (t.pour === moi || t.pour === 'tous')], ['fait', 'Fait (14 j)', (t) => t.fait]];
+    const f = FILTRES.find((x) => x[0] === filtreAFaire) || FILTRES[0];
+    const l = liste.filter(f[2]);
+    el.innerHTML = `
+      <button class="bouton-principal" id="af-ajouter" style="width:100%;margin-bottom:12px">${icone('add_task')}Ajouter à faire</button>
+      <div class="puces">${FILTRES.map(([id, lib, t]) => `<button class="puce${id === filtreAFaire ? ' actif' : ''}" data-filtre-af="${id}">${esc(lib)} (${nf(liste.filter(t).length)})</button>`).join('')}</div>
+      <div class="bloc"><ul class="liste-a-faire">${l.map(ligneAFaire).join('') || `<li class="doux" style="padding:12px 0">${filtreAFaire === 'fait' ? 'Rien de coché ces 14 derniers jours.' : 'Rien à faire dans la liste.'}</li>`}</ul></div>
+      <p class="note">Liste de la famille. Les lignes cochées restent visibles 14 jours.</p>`;
+    const recharger = () => vueAFaire(el);
+    $('#af-ajouter', el).addEventListener('click', () => ajouterAFaire(recharger));
+    $$('[data-filtre-af]', el).forEach((b) => b.addEventListener('click', () => { filtreAFaire = b.dataset.filtreAf; vueAFaire(el); }));
+    brancherAFaire(el, recharger);
+  }
+  // Bloc de l'accueil : les 5 prochaines choses à faire
+  async function blocAFaireAccueil(zone) {
+    if (!zone) return;
+    let r;
+    try { r = await lire('a_faire'); } catch (e) { zone.innerHTML = ''; return; }
+    const reste = ((r && r.liste) || []).filter((t) => !t.fait);
+    const montres = reste.slice(0, 5);
+    zone.innerHTML = `<div class="bloc">
+      <h2>${icone('checklist')}À faire ${reste.length ? `<span class="doux h2-doux">· ${nf(reste.length)}</span>` : ''}</h2>
+      ${montres.length ? `<ul class="liste-a-faire">${montres.map(ligneAFaire).join('')}</ul>` : '<p class="doux" style="margin:0 0 4px">Rien dans la liste. Ajoute ce qu\'il y a à faire à la ferme : tout le monde le verra.</p>'}
+      <div class="boutons-ligne"><button class="bouton-secondaire" id="af-accueil-ajouter">${icone('add')}Ajouter</button>${reste.length ? `<button class="bouton-discret" id="af-accueil-tout">Tout voir</button>` : ''}</div>
+    </div>`;
+    const recharger = () => blocAFaireAccueil(zone);
+    $('#af-accueil-ajouter', zone).addEventListener('click', () => ajouterAFaire(recharger));
+    const tout = $('#af-accueil-tout', zone); if (tout) tout.addEventListener('click', () => ouvrir(PAGES.a_faire[0], PAGES.a_faire[1]));
+    brancherAFaire(zone, recharger);
+  }
+
   async function ouvrirDocument(d, apres) {
     if (!d) return;
     let u = null;
@@ -2389,18 +2685,23 @@
       if (u.montant) donnees.montant_eur = u.montant.replace(',', '.');
       if (u.cible) donnees[etat.atelier === 'sci' ? 'maison' : 'batiment'] = u.cible;
       err.textContent = ''; bt.disabled = true; bt.innerHTML = icone('hourglass_top') + 'Enregistrement…';
-      const { error } = await sb.rpc('famille_ajouter', { p_donnees: {
+      const paquet = {
         atelier: etat.atelier, type: t,
         numero_animal: u.numero || null, lot: u.lot || null, parcelle: u.parcelle || null,
         date_evenement: date, precision_date: date ? 'jour' : 'inconnue',
         resume: resume(), donnees, texte_origine: u.texte || null, via: 'appli-formulaire'
-      } });
-      if (error) { err.textContent = messageErreur(error) + ' Ta saisie est gardée : réessaie.'; bt.disabled = false; bt.innerHTML = icone('check') + 'Enregistrer'; return; }
-      viderCache();
+      };
+      let error = null;
+      try { ({ error } = await sb.rpc('famille_ajouter', { p_donnees: paquet })); } catch (e) { error = e; }
+      // Pas de réseau : l'info est gardée sur le téléphone et partira toute seule quand le réseau revient
+      const sansReseau = error && estErreurReseau(error);
+      if (sansReseau) mettreEnAttente(paquet);
+      if (error && !sansReseau) { err.textContent = messageErreur(error) + ' Ta saisie est gardée : réessaie.'; bt.disabled = false; bt.innerHTML = icone('check') + 'Enregistrer'; return; }
+      if (!sansReseau) viderCache();
       enregistreAuMoinsUne = true; saisieEnCours = false;
-      corps.innerHTML = `<div class="info-ok">${icone('check_circle', 'plein')}<h2 class="feuille-titre" style="margin:8px 0">C'est noté</h2>
+      corps.innerHTML = `<div class="info-ok">${icone(sansReseau ? 'cloud_upload' : 'check_circle', 'plein')}<h2 class="feuille-titre" style="margin:8px 0">${sansReseau ? 'Gardé sur le téléphone' : 'C\'est noté'}</h2>
         <p class="doux">${esc(resume())}</p>
-        <p class="doux">Tu la retrouves dans « Plus › Infos ajoutées par la famille ».</p>
+        <p class="doux">${sansReseau ? 'Pas de réseau : l\'info partira toute seule dès que le téléphone retrouve du réseau.' : 'Tu la retrouves dans « Plus › Infos ajoutées par la famille ».'}</p>
         <div class="feuille-boutons"><button class="bouton-secondaire" id="info-encore">${icone('add')}Noter autre chose</button><button class="bouton-principal" id="info-fermer">Fermer</button></div></div>`;
       $('#info-fermer', corps).addEventListener('click', () => f.fermer());
       $('#info-encore', corps).addEventListener('click', () => {
@@ -2538,6 +2839,8 @@
   function montrerAppli() {
     montrerEcran('ecran-appli');
     allerOnglet('accueil');
+    majBandeau();
+    envoyerEnAttente();
   }
   function montrerAttente(s) {
     viderCache();
@@ -2633,7 +2936,10 @@
     b.disabled = false;
   });
   $('#attente-sortir').addEventListener('click', async () => { await sb.auth.signOut(); montrerConnexion(); });
-  sb.auth.onAuthStateChange((evenement) => { if (evenement === 'SIGNED_OUT') montrerConnexion(); });
+  // Déconnexion : on efface les données gardées sur le téléphone et les infos pas encore envoyées
+  sb.auth.onAuthStateChange((evenement) => {
+    if (evenement === 'SIGNED_OUT') { effacerDonneesGardees(); ecrireFile([]); horsLigneDepuis = null; majBandeau(); montrerConnexion(); }
+  });
 
   (async function demarrer() {
     appliquerTailleTexte();

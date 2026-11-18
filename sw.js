@@ -1,5 +1,5 @@
 // Garde seulement les fichiers de l'appli (pas les données de la ferme) pour qu'elle s'ouvre vite.
-const CACHE = 'ferme-denis-v24';
+const CACHE = 'ferme-denis-v25';
 const FICHIERS = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'icon.svg', 'icon-512.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -7,7 +7,7 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((cles) => Promise.all(cles.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((cles) => Promise.all(cles.filter((k) => k !== CACHE && !k.startsWith('ferme-denis-donnees')).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', (e) => {
