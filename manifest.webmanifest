@@ -1,0 +1,15 @@
+{
+  "name": "Ferme Denis",
+  "short_name": "Ferme Denis",
+  "description": "Les données de la ferme pour la famille (lecture seule).",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f5f0",
+  "theme_color": "#2f6b3a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

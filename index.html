@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ferme Denis</title>
+  <meta name="theme-color" content="#2f6b3a">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Ferme Denis">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0&display=block">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Écran de connexion -->
+  <section id="ecran-connexion" class="ecran" hidden>
+    <div class="connexion-boite">
+      <img src="icon.svg" alt="" class="logo">
+      <h1 id="titre-connexion">Ferme Denis</h1>
+      <p class="sous-titre" id="texte-connexion">Les données de la ferme, pour la famille.</p>
+      <form id="form-connexion" autocomplete="on">
+        <label for="email">Adresse e-mail</label>
+        <input id="email" name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" required>
+        <div id="bloc-code" hidden>
+          <label for="code-acces">Code d'accès donné par Hugo</label>
+          <input id="code-acces" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="6 chiffres">
+        </div>
+        <label for="mdp">Mot de passe</label>
+        <div class="champ-mdp">
+          <input id="mdp" name="password" type="password" autocomplete="current-password" required>
+          <button type="button" class="voir-mdp" data-voir="mdp" aria-label="Afficher le mot de passe"><span class="ms">visibility</span></button>
+        </div>
+        <div id="bloc-mdp2" hidden>
+          <label for="mdp2">Le même, une deuxième fois</label>
+          <div class="champ-mdp">
+            <input id="mdp2" name="password2" type="password" autocomplete="new-password">
+            <button type="button" class="voir-mdp" data-voir="mdp2" aria-label="Afficher le mot de passe"><span class="ms">visibility</span></button>
+          </div>
+          <p class="petit gauche" id="aide-mdp">Au moins 8 caractères. Choisis-en un facile à retenir pour toi, et garde-le pour toi.</p>
+        </div>
+        <button type="submit" class="bouton-principal" id="bouton-connexion">Entrer</button>
+        <p id="erreur-connexion" class="erreur" role="alert"></p>
+      </form>
+      <button type="button" class="lien" id="lien-mode">Première fois ? Choisis ton mot de passe</button>
+      <p class="petit">Le téléphone garde ta connexion.<br>Mot de passe oublié ? Demande à Hugo de rouvrir ton accès, puis touche « Première fois ? ».</p>
+    </div>
+  </section>
+
+  <!-- Compte créé, en attente de validation par Hugo -->
+  <section id="ecran-attente" class="ecran" hidden>
+    <div class="connexion-boite">
+      <img src="icon.svg" alt="" class="logo">
+      <h1 id="titre-attente">Bonjour !</h1>
+      <p class="sous-titre" id="texte-attente"></p>
+      <button type="button" class="bouton-principal" id="attente-verifier" style="width:100%"><span class="ms">refresh</span>Vérifier</button>
+      <button type="button" class="lien" id="attente-sortir">Se déconnecter</button>
+    </div>
+  </section>
+
+  <!-- Application -->
+  <section id="ecran-appli" class="ecran" hidden>
+    <header class="barre-haut">
+      <button id="bouton-retour" class="bouton-retour" hidden aria-label="Retour"><span class="ms">arrow_back</span></button>
+      <h1 id="titre-page">Ferme Denis</h1>
+      <button id="bouton-chercher" class="bouton-retour" aria-label="Chercher" title="Chercher"><span class="ms">search</span></button>
+      <button id="bouton-actualiser" class="bouton-retour" aria-label="Actualiser" title="Actualiser"><span class="ms">refresh</span></button>
+    </header>
+
+    <main id="contenu" tabindex="-1"></main>
+    <div id="vue-carte" hidden>
+      <div id="carte"></div>
+      <div id="carte-couches" class="carte-couches replie"></div>
+    </div>
+
+    <form id="barre-saisie" class="barre-saisie" hidden>
+      <textarea id="saisie" rows="1" placeholder="Écris ou dicte ta question…" aria-label="Ta question"></textarea>
+      <button type="submit" id="bouton-envoyer" aria-label="Envoyer"><span class="ms plein">arrow_upward</span></button>
+    </form>
+
+    <nav class="barre-bas" aria-label="Menu">
+      <button data-onglet="accueil" class="onglet actif"><span class="ms">home</span><span>Accueil</span></button>
+      <button data-onglet="vaches" class="onglet"><span class="ms">pets</span><span>Troupeau</span></button>
+      <button data-onglet="volailles" class="onglet"><span class="ms">egg_alt</span><span>Volailles</span></button>
+      <button data-onglet="carte" class="onglet"><span class="ms">map</span><span>Carte</span></button>
+      <button data-onglet="discuter" class="onglet"><span class="ms">forum</span><span>Discuter</span></button>
+      <button data-onglet="plus" class="onglet"><span class="ms">menu</span><span>Plus</span></button>
+    </nav>
+  </section>
+
+  <div id="chargement" class="chargement" hidden><div class="rond"></div></div>
+
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
