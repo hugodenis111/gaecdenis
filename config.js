@@ -5,5 +5,5 @@
 window.AGRIOS_CONFIG = {
   supabaseUrl: "https://sifaftjughdrqwzbvxxx.supabase.co",
   supabaseKey: "sb_publishable_HkFEQP-QDQPF7yMQXfScBQ_QXrVfdI2",
-  version: "4.4 — 19/11/2026"
+  version: "4.5 — 19/11/2026"
 };

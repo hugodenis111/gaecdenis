@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.4
+/* Ferme Denis — appli famille (AGRIOS) — version 4.5
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -401,11 +401,11 @@
 
       <div class="bloc">
         <h2>${icone('pets')}Troupeau <span class="doux h2-doux">· ${nf(b.total)} bêtes</span></h2>
-        <div class="chiffres${groupesTroupeau.length ? ' quatre' : ''}">
+        <div class="chiffres${groupesTroupeau.length ? ' trois' : ''}">
           ${groupesTroupeau.length ? groupesTroupeau.map((f) => `<button class="chiffre chiffre-bouton" data-aller="vaches" data-options='{"filtre":"${f.id}"}'><b>${nf(compteGroupe(f.id))}</b><span>${esc(LIBELLES_COURTS[f.id] || f.libelle)}</span></button>`).join('')
             : chiffre(b.vaches, 'Vaches') + chiffre(b.total, 'bovins en tout')}
         </div>
-        <p class="note" style="margin-bottom:0">Inventaire EDE du ${esc(dateFr(dateInventaire))}${dateVerifEde !== dateInventaire ? `, vérifié le ${esc(dateFr(dateVerifEde))}` : ''}. Génisses et mâles : 1 an et plus ; veaux : moins d'1 an. Touche un chiffre pour voir les bêtes.</p>
+        <p class="note" style="margin-bottom:0">Inventaire EDE du ${esc(dateFr(dateInventaire))}${dateVerifEde !== dateInventaire ? `, vérifié le ${esc(dateFr(dateVerifEde))}` : ''}. Génisses 2 ans : 21 mois et plus ; velles et broutards : moins d'1 an. Touche un chiffre pour voir les bêtes.</p>
       </div>
 
       ${cultures.length ? `<div class="bloc">
@@ -488,21 +488,35 @@
     }
   }
   const CLE_BIENVENUE = 'ferme-denis-bienvenue-v1';
-  // Mots courts pour les 4 chiffres du troupeau sur l'accueil
-  const LIBELLES_COURTS = { vaches: 'Vaches', genisses: 'Génisses', veaux: 'Veaux', males: 'Mâles' };
+  // Mots courts pour les chiffres du troupeau sur l'accueil
+  const LIBELLES_COURTS = { vaches: 'Vaches', genisses2: 'Génisses 2 ans', genisses1: 'Génisses 1 an', velles: 'Velles', broutards: 'Broutards', taureaux: 'Taureaux' };
   // Date de l'inventaire EDE si la base ne la donne pas (accueil.bovins.inventaire_le)
   const INVENTAIRE_EDE = '2026-10-31';
 
   // =====================================================================
   // Troupeau
   // =====================================================================
+  // Les groupes comme on les appelle à la ferme (Hugo, 19/11/2026) :
+  // vaches (mères allaitantes), génisses de 2 ans (avec les taureaux, pleines ou qui vont l'être, vont vêler),
+  // génisses de 1 an (bientôt saillies), velles (veaux femelles), broutards (veaux mâles), taureaux.
+  // Limite génisses 1 an / 2 ans : 21 mois, là où l'inventaire n'a aucune génisse (à confirmer par Hugo).
+  const AGE_GENISSE_2ANS = 21;
+  function typeBete(v) {
+    const a = Number(v.age_mois ?? 0);
+    if (v.categorie_ede === 'VA' || v.categorie_ede === 'VL') return 'vaches';
+    if (v.categorie_ede === 'MA' || v.sexe === 'M') return a < 12 ? 'broutards' : 'taureaux';
+    return a < 12 ? 'velles' : a < AGE_GENISSE_2ANS ? 'genisses1' : 'genisses2';
+  }
+  const MOT_TYPE = { vaches: 'vache', genisses2: 'génisse 2 ans', genisses1: 'génisse 1 an', velles: 'velle', broutards: 'broutard', taureaux: 'taureau' };
   const FILTRES_VACHES = [
     { id: 'toutes', libelle: 'Toutes', test: () => true },
-    { id: 'vaches', libelle: 'Vaches', test: (v) => v.categorie_ede === 'VA' },
-    { id: 'genisses', libelle: 'Génisses (1 an et +)', test: (v) => v.categorie_ede === 'GV' && v.age_mois >= 12 },
-    { id: 'veaux', libelle: "Veaux (moins d'1 an)", test: (v) => v.age_mois < 12 },
-    { id: 'males', libelle: 'Mâles (1 an et +)', test: (v) => v.categorie_ede === 'MA' && v.age_mois >= 12 }
-  ];
+    { id: 'vaches', libelle: 'Vaches (mères allaitantes)' },
+    { id: 'genisses2', libelle: 'Génisses de 2 ans (vont vêler)' },
+    { id: 'genisses1', libelle: 'Génisses de 1 an' },
+    { id: 'velles', libelle: 'Velles (veaux femelles)' },
+    { id: 'broutards', libelle: 'Broutards' },
+    { id: 'taureaux', libelle: 'Taureaux' }
+  ].map((f) => (f.test ? f : Object.assign(f, { test: (v) => typeBete(v) === f.id })));
   let filtreVaches = 'toutes';
   let triVaches = 'numero';
 
@@ -581,7 +595,7 @@
       $('#compte-vaches', el).textContent = pluriel(liste.length, 'bête');
       $('#liste-vaches', el).innerHTML = liste.map((v) => `
         <li><button data-num="${esc(v.numero_national)}">
-          <span class="g"><b>${esc(v.numero_travail)} <span class="etiquette">${esc(v.categorie_ede === 'VA' ? 'vache' : v.categorie_ede === 'MA' ? 'mâle' : (v.age_mois < 12 ? 'veau' : 'génisse'))}</span></b>
+          <span class="g"><b>${esc(v.numero_travail)} <span class="etiquette">${esc(MOT_TYPE[typeBete(v)])}</span></b>
           <span class="doux">${esc(age(v.age_mois))}${v.race ? ' · ' + esc(v.race) : ''}${v.nb_veaux_presents ? ' · ' + pluriel(v.nb_veaux_presents, 'veau') : ''}</span></span>
           <span class="d">${esc(v.groupe_actuel ? v.groupe_actuel.split(':')[0] : '')}</span>
         </button></li>`).join('') || '<li class="doux" style="padding:12px 0">Aucune bête ne correspond.</li>';
@@ -766,7 +780,7 @@
     titrePage(el, 'N° ' + f.numero_travail);
     // Un vêlage noté dans le carnet compte, même si l'inventaire EDE la classe encore génisse
     const veleSelonCarnet = f.sexe === 'F' && f.categorie_ede !== 'VA' && h.some((x) => /^v[êe]lage/i.test(String(x.quoi)) && !/inventaire/i.test(String(x.source || '')));
-    const etiquette = f.categorie_ede === 'VA' || veleSelonCarnet ? 'Vache' : f.categorie_ede === 'MA' ? 'Mâle' : (f.age_mois < 12 ? 'Veau' : 'Génisse');
+    const etiquette = veleSelonCarnet ? 'Vache' : majuscule(MOT_TYPE[typeBete(f)]);
 
     el.innerHTML = `
       <div class="bloc fiche-tete">
@@ -973,7 +987,7 @@
       texte: sansAccents(titre + ' ' + sous + ' ' + mots).replace(/(\d)[\s  ](?=\d)/g, '$1'), action, numero });
     const fin4 = (n) => String(n || '').replace(/\s/g, '').slice(-4);
     vaches.forEach((v) => {
-      const quoi = v.categorie_ede === 'VA' ? 'vache' : v.categorie_ede === 'MA' ? (v.age_mois < 12 ? 'veau mâle' : 'mâle') : (v.age_mois < 12 ? 'velle' : 'génisse');
+      const quoi = MOT_TYPE[typeBete(v)];
       ajouter('Bêtes', 'pets', `${v.numero_travail} · ${quoi}`,
         [age(v.age_mois), v.race, v.mere_numero ? 'mère ' + fin4(v.mere_numero) : '', v.groupe_actuel ? v.groupe_actuel.split(':')[0] : ''].filter(Boolean).join(' · '),
         `${String(v.numero_national || '').replace(/\s/g, '')} ${v.age_mois < 12 ? 'veau veaux' : ''} ${v.groupe_actuel || ''}`,
