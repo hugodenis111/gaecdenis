@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.7.1
+/* Ferme Denis — appli famille (AGRIOS) — version 4.8
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -412,7 +412,8 @@
         <h2>${icone('grass')}Cultures ${esc(a.cultures_annee || '')} <span class="doux h2-doux">· ${nf(totalHa, 0)} ha</span></h2>
         <div class="barre-cultures" aria-hidden="true">${cultures.map((c) => `<i style="flex:${Number(c.ha) || 0};background:${couleurCulture(c.code)}"></i>`).join('')}</div>
         ${cultures.map((c) => `<button class="ligne-culture" data-carte-code="${esc(c.code)}">${pastilleCulture(c.code)}<span class="nom">${esc(c.culture)}</span><b>${nf(c.ha, 1)} ha</b></button>`).join('')}
-        <p class="note" style="margin-bottom:0">Déclaration PAC ${esc(a.cultures_annee || '')} (Télépac). Touche une culture pour la voir en jaune sur la carte.</p>
+        ${a.sapinieres && a.sapinieres.nb ? `<button class="ligne-culture" data-carte-code=""><span class="ms" aria-hidden="true" style="font-size:18px;color:#2f8f4e;width:12px;margin:0 6px 0 -3px">park</span><span class="nom">Sapinières de la famille (${nf(a.sapinieres.nb)}, hors PAC)</span><b>${nf(a.sapinieres.ha, 1)} ha</b></button>` : ''}
+        <p class="note" style="margin-bottom:0">Déclaration PAC ${esc(a.cultures_annee || '')} (Télépac). Touche une culture pour la voir en jaune sur la carte.${a.sapinieres && a.sapinieres.nb ? ' Les sapinières (carnet de plantations et contours de Hugo) ne sont pas dans la déclaration PAC : elles sont comptées à part. La « surface non exploitée » de la PAC, ce sont d\'autres parcelles, sans sapins.' : ''}</p>
       </div>` : ''}
 
       <p class="note pied">${Object.keys(nomsAteliers).filter((k) => maj[k]).length ? `À jour : ${Object.keys(nomsAteliers).filter((k) => maj[k]).map((k) => `${esc(nomsAteliers[k])} ${esc(dateFr(maj[k], true))}`).join(' · ')}<br>` : ''}Ferme Denis · version ${esc(C.version)}</p>`;
@@ -1686,8 +1687,57 @@
       '&STYLE=normal&TILEMATRIXSET=PM&FORMAT=' + format + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', { maxZoom: 20, maxNativeZoom: 19, attribution: '© IGN' });
   }
 
+  // Zoom à la molette et au pavé tactile du Mac : continu et doux, autour du pointeur.
+  // Le zoom Leaflet d'origine avance par crans (à-coups) et le pincement du pavé tactile y est très lent.
+  // Même mécanique que le pincement sur téléphone (map._move pendant le geste, _moveEnd à la fin).
+  function zoomDoux(map) {
+    map.scrollWheelZoom.disable();
+    const el = map.getContainer();
+    let but = null, pt = null, sousPt = null, anim = 0, enCours = false, minuterie = 0, zDebut = null;
+    const borne = (z) => Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), z));
+    function terminer() {
+      cancelAnimationFrame(anim); anim = 0; but = null;
+      if (enCours) { enCours = false; map._moveEnd(true); }
+    }
+    function image() {
+      anim = 0;
+      if (but === null) return;
+      const z = map.getZoom();
+      const n = Math.abs(but - z) < 0.004 ? but : z + (but - z) * 0.3;
+      // le point de la carte sous le pointeur reste sous le pointeur
+      const decal = pt.subtract(map.getSize().divideBy(2));
+      map._move(map.unproject(map.project(sousPt, n).subtract(decal), n), n);
+      if (n !== but) anim = requestAnimationFrame(image);
+    }
+    function viser(dz, e) {
+      const p = map.mouseEventToContainerPoint(e);
+      if (!enCours || !pt || p.distanceTo(pt) > 3) { pt = p; sousPt = map.containerPointToLatLng(p); }
+      if (!enCours) { enCours = true; map._stop(); map._moveStart(true, false); }
+      but = borne((but === null ? map.getZoom() : but) + dz);
+      if (!anim) anim = requestAnimationFrame(image);
+      clearTimeout(minuterie);
+      minuterie = setTimeout(terminer, 250);
+    }
+    el.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16; else if (e.deltaMode === 2) dy *= 400;
+      // Pincement du pavé tactile (Chrome, Edge, Firefox : molette + Ctrl) : plus sensible ; deux doigts ou molette : modéré
+      viser(Math.max(-1, Math.min(1, -dy * (e.ctrlKey ? 0.012 : 0.004))), e);
+    }, { passive: false });
+    // Safari sur Mac : le pincement arrive en « gesture » (e.scale)
+    el.addEventListener('gesturestart', (e) => { e.preventDefault(); zDebut = but === null ? map.getZoom() : but; });
+    el.addEventListener('gesturechange', (e) => {
+      e.preventDefault();
+      if (zDebut === null) return;
+      viser(borne(zDebut + Math.log2(e.scale || 1)) - (but === null ? map.getZoom() : but), e);
+    });
+    el.addEventListener('gestureend', (e) => { e.preventDefault(); zDebut = null; });
+  }
+
   function initCarte() {
     carte = L.map('carte', { zoomControl: false, attributionControl: true, zoomSnap: 0.25 });
+    zoomDoux(carte);
     L.control.zoom({ position: 'topright' }).addTo(carte);
     const photo = coucheIGN('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg');
     const plan = coucheIGN('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png');
