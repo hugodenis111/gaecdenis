@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.6
+/* Ferme Denis — appli famille (AGRIOS) — version 4.7
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -1227,7 +1227,20 @@
   // ---------------------------------------------------------------------
   // Suivi jour par jour d'un lot (registre MyTR) comparé aux lots d'avant du même poulailler, au même âge
   // ---------------------------------------------------------------------
-  const isoAujourdhui = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  // Dates du registre à l'heure de Paris (celle de la ferme et de l'automate), quel que soit le réglage du téléphone
+  const isoParis = (t) => { const d = t == null ? new Date() : new Date(t); return isNaN(d) ? null : new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); };
+  const isoAujourdhui = () => isoParis();
+  // Un jour du registre n'est complet que s'il a été relu APRÈS la fin de cette journée (heure de Paris).
+  // Le relevé de 9 h donne le total de la veille et seulement le début du jour même : à minuit, ce début
+  // de journée ne devient pas un jour complet tant qu'un nouveau relevé ne l'a pas relu.
+  // x.lu = date et heure de lecture du jour (Paris, « AAAA-MM-JJTHH:MM ») ; à défaut, la dernière lecture du lot.
+  const luLe = (x, detail) => (x && x.lu ? String(x.lu) : null) || (detail && detail.releves_le ? isoParis(detail.releves_le) : null);
+  const jourPartiel = (x, detail) => {
+    const jour = String(x.date).slice(0, 10);
+    if (jour >= isoAujourdhui()) return true;
+    const lu = luLe(x, detail);
+    return !!lu && jour >= lu.slice(0, 10);
+  };
   const ecartPct = (v, ref) => (v == null || !ref ? null : Math.round(((Number(v) - Number(ref)) / Number(ref)) * 100));
   const texteEcart = (p) => (p === null ? '' : p === 0 ? 'comme d\'habitude' : (p > 0 ? '+' : '−') + Math.abs(p) + ' %');
   function suiviLot(l, detail) {
@@ -1236,8 +1249,10 @@
     const refs = {}; ((detail && detail.reference) || []).forEach((x) => { refs[Number(x.j)] = x; });
     const eff = detail && detail.effectif ? Number(detail.effectif) : null;
     const enCours = l.poids_moyen_kg == null && !l.date_fin;
-    // Le jour en cours n'est pas fini : on regarde le dernier jour complet
-    const complets = rel.filter((x) => !(enCours && String(x.date).slice(0, 10) >= isoAujourdhui()));
+    // Un jour pas fini, ou pas relu depuis sa fin, est partiel : on regarde le dernier jour complet
+    const complets = rel.filter((x) => !jourPartiel(x, detail));
+    const partiels = rel.filter((x) => jourPartiel(x, detail));
+    const partiel = enCours ? partiels[partiels.length - 1] || null : null;
     const d = complets[complets.length - 1] || null;
     const r = d ? refs[d.j] || {} : {};
     const parPoulet = (v, f) => (v == null || !eff ? null : Math.round((Number(v) * f) / eff));
@@ -1256,13 +1271,13 @@
       const eauP = p && p.j === d.j - 1 ? ecartPct(parPoulet(p.eau, 1000), rp.eau_ml) : null;
       const alimP = p && p.j === d.j - 1 ? ecartPct(parPoulet(p.alim, 1000), rp.alim_g) : null;
       const deuxJours = (a, b, test) => a !== null && b !== null && test(a) && test(b);
-      if (ecarts.eau !== null && ecarts.eau <= -30) alertes.push(`Eau d'hier très basse (${texteEcart(ecarts.eau)} par poulet) : vérifier l'arrivée d'eau`);
+      if (ecarts.eau !== null && ecarts.eau <= -30) alertes.push(`Eau très basse le ${dateFr(String(d.date).slice(0, 10), true)} (${texteEcart(ecarts.eau)} par poulet) : vérifier l'arrivée d'eau`);
       else if (deuxJours(ecarts.eau, eauP, (x) => x <= -15)) alertes.push(`Eau plus basse que d'habitude deux jours de suite (${texteEcart(eauP)} puis ${texteEcart(ecarts.eau)} par poulet)`);
       if (deuxJours(ecarts.eau, eauP, (x) => x >= 15)) alertes.push(`Eau plus haute que d'habitude deux jours de suite (${texteEcart(eauP)} puis ${texteEcart(ecarts.eau)} par poulet)`);
       if (deuxJours(ecarts.alim, alimP, (x) => x <= -15)) alertes.push(`Aliment plus bas que d'habitude deux jours de suite (${texteEcart(alimP)} puis ${texteEcart(ecarts.alim)} par poulet)`);
       if (d.j >= 14 && ((ecarts.pm !== null && ecarts.pm <= -10) || (ecarts.pf !== null && ecarts.pf <= -10))) alertes.push('Poids en dessous de l\'objectif de MyTR');
     }
-    return { rel, refs, eff, enCours, d, r, eauMl, alimG, ecarts, alertes };
+    return { rel, refs, eff, enCours, d, r, eauMl, alimG, ecarts, alertes, partiel, luPartiel: partiel ? luLe(partiel, detail) : null };
   }
 
   // Courbes par jour d'âge : séries [{ nom, couleur, tirets, points: [[jour, valeur]] }]
@@ -1361,6 +1376,7 @@
         <h2>${icone('monitoring')}Suivi jour par jour</h2>
         ${suivi.d && suivi.enCours ? `
           <p class="doux" style="margin-top:0">Dernier jour complet : <b>jour ${nf(suivi.d.j)}</b> (${esc(dateFr(String(suivi.d.date).slice(0, 10)))})${suivi.refs[suivi.d.j] && suivi.refs[suivi.d.j].n ? ` · comparé à ${pluriel(suivi.refs[suivi.d.j].n, 'lot')} d'avant du même poulailler au jour ${nf(suivi.d.j)}` : ''}</p>
+          ${suivi.partiel ? `<p class="doux">Jour ${nf(suivi.partiel.j)} (${esc(dateFr(String(suivi.partiel.date).slice(0, 10), true))}) : ${String(suivi.partiel.date).slice(0, 10) >= isoAujourdhui() ? 'journée en cours' : 'relevé partiel, pas encore relu après la fin de la journée'}${suivi.luPartiel && suivi.luPartiel.length > 10 ? ` (lu le ${esc(dateFr(suivi.luPartiel.slice(0, 10), true))} à ${esc(suivi.luPartiel.slice(11, 16).replace(':', ' h '))})` : ''}, pas compté.</p>` : ''}
           ${suivi.alertes.length ? `<div class="fil-alertes" style="margin-bottom:10px">${suivi.alertes.map((a) => `<div class="alerte-ligne attention">${icone('warning')}<span class="txt"><b>${esc(a)}</b></span></div>`).join('')}</div>` : ''}
           <div class="chiffres">
             ${suivi.d.eau != null ? `<div class="chiffre"><b>${nf(suivi.d.eau)} L</b><span>eau${suivi.eauMl != null ? ` · ${nf(suivi.eauMl)} ml/poulet` : ''}${suivi.ecarts.eau !== null ? `<br>${esc(texteEcart(suivi.ecarts.eau))} / lots d'avant` : ''}</span></div>` : ''}
@@ -1426,7 +1442,7 @@
 
     if (suivi && ONGLETS_SUIVI.length) {
       // Jours à tracer : pas le jour en cours (pas fini) ni le dernier jour d'un lot fini s'il est très incomplet
-      const relC = suivi.rel.filter((x, i, a) => !(suivi.enCours && String(x.date).slice(0, 10) >= isoAujourdhui())
+      const relC = suivi.rel.filter((x, i, a) => !jourPartiel(x, detail)
         && !(!suivi.enCours && i === a.length - 1 && i > 0 && x.eau != null && a[i - 1].eau && Number(x.eau) < Number(a[i - 1].eau) * 0.4));
       const refT = Object.values(suivi.refs).map((x) => Object.assign({}, x, { j: Number(x.j) })).sort((a, b) => a.j - b.j);
       const pp = (v, f) => (v == null ? null : suivi.eff ? (Number(v) * f) / suivi.eff : Number(v));
