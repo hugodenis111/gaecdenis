@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.7
+/* Ferme Denis — appli famille (AGRIOS) — version 4.7.1
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -405,7 +405,7 @@
           ${groupesTroupeau.length ? groupesTroupeau.map((f) => `<button class="chiffre chiffre-bouton" data-aller="vaches" data-options='{"filtre":"${f.id}"}'><b>${nf(compteGroupe(f.id))}</b><span>${esc(LIBELLES_COURTS[f.id] || f.libelle)}</span></button>`).join('')
             : chiffre(b.vaches, 'Vaches') + chiffre(b.total, 'bovins en tout')}
         </div>
-        <p class="note" style="margin-bottom:0">Inventaire EDE du ${esc(dateFr(dateInventaire))}${dateVerifEde !== dateInventaire ? `, vérifié le ${esc(dateFr(dateVerifEde))}` : ''}. Génisses 2 ans : 21 mois et plus ; velles et broutards : moins d'1 an. Touche un chiffre pour voir les bêtes.</p>
+        <p class="note" style="margin-bottom:0">Inventaire EDE du ${esc(dateFr(dateInventaire))}${dateVerifEde !== dateInventaire ? `, vérifié le ${esc(dateFr(dateVerifEde))}` : ''}. Les génisses de 2 ans ont au moins 21 mois. Les veaux femelles et les broutards ont moins d’un an. Touche un chiffre pour voir les bêtes.</p>
       </div>
 
       ${cultures.length ? `<div class="bloc">
@@ -489,7 +489,7 @@
   }
   const CLE_BIENVENUE = 'ferme-denis-bienvenue-v1';
   // Mots courts pour les chiffres du troupeau sur l'accueil
-  const LIBELLES_COURTS = { vaches: 'Vaches', genisses2: 'Génisses 2 ans', genisses1: 'Génisses 1 an', velles: 'Velles', broutards: 'Broutards', taureaux: 'Taureaux' };
+  const LIBELLES_COURTS = { vaches: 'Vaches', genisses2: 'Génisses 2 ans', genisses1: 'Génisses 1 an', velles: 'Veaux femelles', broutards: 'Broutards', taureaux: 'Taureaux' };
   // Date de l'inventaire EDE si la base ne la donne pas (accueil.bovins.inventaire_le)
   const INVENTAIRE_EDE = '2026-10-31';
 
@@ -498,7 +498,7 @@
   // =====================================================================
   // Les groupes comme on les appelle à la ferme (Hugo, 19/11/2026) :
   // vaches (mères allaitantes), génisses de 2 ans (avec les taureaux, pleines ou qui vont l'être, vont vêler),
-  // génisses de 1 an (bientôt saillies), velles (veaux femelles), broutards (veaux mâles), taureaux.
+  // génisses de 1 an (bientôt saillies), veaux femelles, broutards (veaux mâles), taureaux.
   // Limite génisses 1 an / 2 ans : 21 mois, là où l'inventaire n'a aucune génisse (à confirmer par Hugo).
   const AGE_GENISSE_2ANS = 21;
   function typeBete(v) {
@@ -507,13 +507,13 @@
     if (v.categorie_ede === 'MA' || v.sexe === 'M') return a < 12 ? 'broutards' : 'taureaux';
     return a < 12 ? 'velles' : a < AGE_GENISSE_2ANS ? 'genisses1' : 'genisses2';
   }
-  const MOT_TYPE = { vaches: 'vache', genisses2: 'génisse 2 ans', genisses1: 'génisse 1 an', velles: 'velle', broutards: 'broutard', taureaux: 'taureau' };
+  const MOT_TYPE = { vaches: 'vache', genisses2: 'génisse 2 ans', genisses1: 'génisse 1 an', velles: 'veau femelle', broutards: 'broutard', taureaux: 'taureau' };
   const FILTRES_VACHES = [
     { id: 'toutes', libelle: 'Toutes', test: () => true },
     { id: 'vaches', libelle: 'Vaches (mères allaitantes)' },
     { id: 'genisses2', libelle: 'Génisses de 2 ans (vont vêler)' },
     { id: 'genisses1', libelle: 'Génisses de 1 an' },
-    { id: 'velles', libelle: 'Velles (veaux femelles)' },
+    { id: 'velles', libelle: 'Veaux femelles' },
     { id: 'broutards', libelle: 'Broutards' },
     { id: 'taureaux', libelle: 'Taureaux' }
   ].map((f) => (f.test ? f : Object.assign(f, { test: (v) => typeBete(v) === f.id })));
@@ -661,7 +661,7 @@
     return Math.max(0, m);
   };
   // Ce qu'était la bête quand elle est partie (un veau de 3 mois n'est pas « un mâle »)
-  const quoiBete = (a, sx, mois) => (estVache(a) ? 'vache' : a === 'MA' ? (mois != null && mois < 12 ? 'veau mâle' : 'mâle') : (mois != null && mois < 12 ? 'velle' : 'génisse'));
+  const quoiBete = (a, sx, mois) => (estVache(a) ? 'vache' : a === 'MA' ? (mois != null && mois < 12 ? 'veau mâle' : 'mâle') : (mois != null && mois < 12 ? 'veau femelle' : 'génisse'));
   const motSortie = (c) => ({ E: "vente pour l'élevage", B: 'boucherie', M: 'mort' }[c] || 'code ' + (c || '?'));
   // « MOL » et « MOL GUERLESQUIN » (destinations écrites par l'EDE) = le marché où la ferme vend ses bêtes (dit par Hugo le 18/11/2026)
   const estMarche = (d) => /^MOL( GUERLESQUIN)?$/.test(String(d || '').trim().toUpperCase());
@@ -1011,18 +1011,20 @@
       texte: sansAccents(titre + ' ' + sous + ' ' + mots).replace(/(\d)[\s  ](?=\d)/g, '$1'), action, numero });
     const fin4 = (n) => String(n || '').replace(/\s/g, '').slice(-4);
     vaches.forEach((v) => {
-      const quoi = MOT_TYPE[typeBete(v)];
+      const groupe = typeBete(v);
+      const quoi = MOT_TYPE[groupe];
       ajouter('Bêtes', 'pets', `${v.numero_travail} · ${quoi}`,
         [age(v.age_mois), v.race, v.mere_numero ? 'mère ' + fin4(v.mere_numero) : '', v.groupe_actuel ? v.groupe_actuel.split(':')[0] : ''].filter(Boolean).join(' · '),
-        `${String(v.numero_national || '').replace(/\s/g, '')} ${v.age_mois < 12 ? 'veau veaux' : ''} ${v.groupe_actuel || ''}`,
+        `${String(v.numero_national || '').replace(/\s/g, '')} ${LIBELLES_COURTS[groupe]} ${groupe === 'velles' ? 'velles' : ''} ${v.age_mois < 12 ? 'veau veaux' : ''} ${v.groupe_actuel || ''}`,
         () => ouvrirVache(v.numero_national), String(v.numero_travail || ''));
     });
     // Bêtes déjà parties (historique EDE depuis 2017), après les bêtes présentes
     const presents = new Set(vaches.map((v) => String(v.numero_national || '').replace(/\s/g, '')));
     ((val(7) && val(7).liste) || []).forEach((x) => {
       if (presents.has(x.n)) return;
-      ajouter('Bêtes parties', 'logout', `${x.t} · ${quoiBete(x.a, x.s, moisEntre(x.dn, x.ds))}`,
-        majuscule(phraseSortie(x.c, x.v, x.s, x.ds)), `${x.n} partie parti sortie ${motSortie(x.c)}`, () => ouvrirVache(x.n), String(x.t || ''));
+      const quoi = quoiBete(x.a, x.s, moisEntre(x.dn, x.ds));
+      ajouter('Bêtes parties', 'logout', `${x.t} · ${quoi}`,
+        majuscule(phraseSortie(x.c, x.v, x.s, x.ds)), `${x.n} partie parti sortie ${motSortie(x.c)} ${quoi === MOT_TYPE.velles ? LIBELLES_COURTS.velles + ' velles' : ''}`, () => ouvrirVache(x.n), String(x.t || ''));
     });
     enTerre.forEach((p) => ajouter('Ce qui pousse maintenant', 'grass', `${majuscule(p.culture || '')} · ${p.nom || ''}`,
       (p.surface_m2 ? surfaceTexte(p.surface_m2) + ' · ' : '') + 'semé pour la récolte qui vient' + (p.statut === 'a_confirmer' ? ' (à confirmer)' : ''),
