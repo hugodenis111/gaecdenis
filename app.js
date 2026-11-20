@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.9
+/* Ferme Denis — appli famille (AGRIOS) — version 4.9.1
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -1198,7 +1198,7 @@
     ['poids_moyen_kg', 'Poids moyen (kg)', 2, 1], ['gmq_g_j', 'Croissance (g/jour)', 0, 1], ['indice_consommation', 'Indice de consommation', 2, -1],
     ['mortalite_pct', 'Mortalité économique (%)', 2, -1], ['saisies_pct', 'Saisies (%)', 2, -1], ['age_moyen_j', "Âge à l'enlèvement (jours)", 0, 0],
     ['aliment_kg_par_tete', 'Aliment par tête (kg)', 2, 0], ['densite_animaux_m2', 'Densité (animaux/m²)', 1, 0], ['marge_eur_m2', 'Marge poussin-aliment (€/m²)', 2, 1],
-    ['marge_eur_par_piece', 'Marge poussin-aliment (€/animal)', 3, 1], ['ventes_eur', 'Ventes (€)', 0, 0], ['aliment_eur', 'Aliment (€)', 0, 0], ['net_a_payer_eur', 'Net à payer (€)', 0, 0]
+    ['marge_eur_par_piece', 'Marge poussin-aliment (€/animal)', 3, 1], ['ventes_eur', 'Ventes (€)', 0, 0], ['aliment_eur', 'Aliment acheté (€)', 0, 0], ['net_a_payer_eur', 'Net à payer (€)', 0, 0]
   ];
   const GRAPH_INDICATEURS = [
     ['marge_eur_m2', 'Marge PA €/m²', 2, '€/m²'], ['indice_consommation', 'Indice de conso.', 2, ''], ['mortalite_pct', 'Mort. éco %', 2, '%'],
@@ -1224,7 +1224,10 @@
     densite_mep_totale: 'Densité totale', densite_mep_femelle: 'Densité femelles', densite_mep_male: 'Densité mâles',
     consommation_par_tete: 'Aliment par tête', ict: 'Indice de consommation', ip: 'Indice de performance', aliment_consomme_kg: 'Aliment consommé',
     aliment_montant_eur: 'Montant aliment', aliment_prix_unitaire: 'Prix de l\'aliment', aliment_incidence_tonnage_eur: 'Incidence tonnage',
-    marge_pa_m2: 'Marge poussin-aliment au m²', marge_pa_par_piece: 'Marge poussin-aliment par animal', marge_pa_par_tonne: 'Marge poussin-aliment par tonne', net_a_payer_eur: 'Net à payer'
+    marge_pa_m2: 'Marge poussin-aliment au m²', marge_pa_par_piece: 'Marge poussin-aliment par animal', marge_pa_par_tonne: 'Marge poussin-aliment par tonne', net_a_payer_eur: 'Net à payer',
+    acomptes_ht_eur: 'Acomptes déjà versés (HT)', solde_ht_eur: 'Solde après acomptes (HT)', solde_ttc_eur: 'Solde après acomptes (TTC)',
+    solde_net_a_payer_apres_acomptes_eur: 'Reste à payer après acomptes', total_enlevements_eur: 'Enlèvements',
+    total_approvisionnements_eur: 'Approvisionnements', total_autres_variables_eur: 'Autres variables'
   };
   const nomMesure = (k) => NOMS_MESURES[k] || (k.charAt(0).toUpperCase() + k.slice(1)).replace(/_eur$/, '').replace(/_nb$/, ' (nombre)').replace(/_t$/, ' (t)').replace(/_/g, ' ');
 
@@ -1259,10 +1262,12 @@
     const partiel = enCours ? partiels[partiels.length - 1] || null : null;
     const d = complets[complets.length - 1] || null;
     const r = d ? refs[d.j] || {} : {};
-    const parPoulet = (v, f) => (v == null || !eff ? null : Math.round((Number(v) * f) / eff));
+    // Valeur par poulet non arrondie pour les écarts (comme la relève automatique) ; arrondie seulement à l'affichage
+    const parPouletBrut = (v, f) => (v == null || !eff ? null : (Number(v) * f) / eff);
+    const parPoulet = (v, f) => { const x = parPouletBrut(v, f); return x == null ? null : Math.round(x); };
     const eauMl = d ? parPoulet(d.eau, 1000) : null, alimG = d ? parPoulet(d.alim, 1000) : null;
     const ecarts = d ? {
-      eau: ecartPct(eauMl, r.eau_ml), alim: ecartPct(alimG, r.alim_g),
+      eau: ecartPct(parPouletBrut(d.eau, 1000), r.eau_ml), alim: ecartPct(parPouletBrut(d.alim, 1000), r.alim_g),
       pm: ecartPct(d.pm, d.om), pf: ecartPct(d.pf, d.of)
     } : {};
     // Seuils validés par Hugo le 18/11/2026 :
@@ -1272,8 +1277,8 @@
     if (d && enCours) {
       const p = complets[complets.length - 2] || null;
       const rp = p ? refs[p.j] || {} : {};
-      const eauP = p && p.j === d.j - 1 ? ecartPct(parPoulet(p.eau, 1000), rp.eau_ml) : null;
-      const alimP = p && p.j === d.j - 1 ? ecartPct(parPoulet(p.alim, 1000), rp.alim_g) : null;
+      const eauP = p && p.j === d.j - 1 ? ecartPct(parPouletBrut(p.eau, 1000), rp.eau_ml) : null;
+      const alimP = p && p.j === d.j - 1 ? ecartPct(parPouletBrut(p.alim, 1000), rp.alim_g) : null;
       const deuxJours = (a, b, test) => a !== null && b !== null && test(a) && test(b);
       if (ecarts.eau !== null && ecarts.eau <= -30) alertes.push(`Eau très basse le ${dateFr(String(d.date).slice(0, 10), true)} (${texteEcart(ecarts.eau)} par poulet) : vérifier l'arrivée d'eau`);
       else if (deuxJours(ecarts.eau, eauP, (x) => x <= -15)) alertes.push(`Eau plus basse que d'habitude deux jours de suite (${texteEcart(eauP)} puis ${texteEcart(ecarts.eau)} par poulet)`);
@@ -1320,14 +1325,16 @@
     const precedents = lots
       .filter((x) => x.lot_id !== l.lot_id && x.production === l.production && x.poids_moyen_kg != null && x.date_mep && l.date_mep && x.date_mep < l.date_mep)
       .sort((a, b) => (a.date_mep < b.date_mep ? 1 : -1)).slice(0, 10);
-    const moyenne = (k) => { const v = precedents.map((x) => x[k]).filter((x) => x != null).map(Number); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+    // Aliment : Fermatel le compte en négatif, Maestro en positif → comparé en coût (valeur absolue)
+    const valIndic = (x, k) => (x == null ? x : k === 'aliment_eur' ? Math.abs(Number(x)) : x);
+    const moyenne = (k) => { const v = precedents.map((x) => valIndic(x[k], k)).filter((x) => x != null).map(Number); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
     const enCours = l.poids_moyen_kg == null;
 
     let tableau = '';
     if (!enCours && precedents.length) {
       tableau = `<table><thead><tr><th></th><th>Ce lot</th><th>Moyenne</th><th>Écart</th></tr></thead><tbody>
         ${INDICATEURS_LOT.map(([k, lib, d, sens]) => {
-          const v = l[k]; const m = moyenne(k);
+          const v = valIndic(l[k], k); const m = moyenne(k);
           if (v === null || v === undefined) return '';
           let ecart = '', cls = '';
           if (m !== null) {
@@ -1365,7 +1372,9 @@
           <p class="note">Calcul : âge le plus courant au départ sur les ${nf(ah.nbLots)} derniers lots ${esc(l.production || '')} à 3 départs (2 de femelles, puis les mâles). Les vraies dates sont fixées avec Maestro.</p></div>` : '';
 
     // Poussins mis en place et suivi jour par jour (registre MyTR)
-    const nbMesure = (k) => { const m = ((detail && detail.mesures) || []).find((x) => x.indicateur === k); return m ? Number(m.valeur) : null; };
+    // Valeurs remplacées par une lecture plus récente (statut « remplace… ») : gardées dans la base, pas affichées
+    const mesuresLot = ((detail && detail.mesures) || []).filter((m) => !/^remplace/.test(String(m.statut || '')));
+    const nbMesure = (k) => { const m = mesuresLot.find((x) => x.indicateur === k); return m ? Number(m.valeur) : null; };
     const effectif = detail && detail.effectif ? Number(detail.effectif) : null;
     const males = nbMesure('animaux_livres_males_nb') ?? nbMesure('poussins_achetes_male_nb');
     const femelles = nbMesure('animaux_livres_femelles_nb') ?? nbMesure('poussins_achetes_femelle_nb');
@@ -1395,7 +1404,7 @@
       </div>`;
 
     // Mesures détaillées par rubrique (les départs ont leur propre bloc)
-    const mesures = ((detail && detail.mesures) || []).filter((m) => !/^depart_/.test(m.indicateur));
+    const mesures = mesuresLot.filter((m) => !/^depart_/.test(m.indicateur));
     const dejaVus = new Set();
     const rubriques = RUBRIQUES.map(([titre, ico, motif]) => {
       const lignes = mesures.filter((m) => !dejaVus.has(m.indicateur) && motif.test(m.indicateur));
