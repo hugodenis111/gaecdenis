@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.8.1
+/* Ferme Denis — appli famille (AGRIOS) — version 4.9
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -412,8 +412,9 @@
         <h2>${icone('grass')}Cultures ${esc(a.cultures_annee || '')} <span class="doux h2-doux">· ${nf(totalHa, 0)} ha</span></h2>
         <div class="barre-cultures" aria-hidden="true">${cultures.map((c) => `<i style="flex:${Number(c.ha) || 0};background:${couleurCulture(c.code)}"></i>`).join('')}</div>
         ${cultures.map((c) => `<button class="ligne-culture" data-carte-code="${esc(c.code)}">${pastilleCulture(c.code)}<span class="nom">${esc(c.culture)}</span><b>${nf(c.ha, 1)} ha</b></button>`).join('')}
-        ${a.sapinieres && a.sapinieres.nb ? `<button class="ligne-culture" data-carte-code=""><span class="ms" aria-hidden="true" style="font-size:18px;color:#2f8f4e;width:12px;margin:0 6px 0 -3px">park</span><span class="nom">Sapinières de la famille (${nf(a.sapinieres.nb)}, hors PAC)</span><b>${nf(a.sapinieres.ha, 1)} ha</b></button>` : ''}
-        <p class="note" style="margin-bottom:0">Déclaration PAC ${esc(a.cultures_annee || '')} (Télépac). Touche une culture pour la voir en jaune sur la carte.${a.sapinieres && a.sapinieres.nb ? ' Les sapinières (carnet de plantations et contours de Hugo) ne sont pas dans la déclaration PAC : elles sont comptées à part. La « surface non exploitée » de la PAC, ce sont d\'autres parcelles, sans sapins.' : ''}</p>
+        ${a.sapinieres && a.sapinieres.nb ? `<button class="ligne-culture" data-carte-code=""><span class="ms" aria-hidden="true" style="font-size:18px;color:#2f8f4e;width:12px;margin:0 6px 0 -3px">park</span><span class="nom">Sapinières (${nf(a.sapinieres.nb)}, hors PAC)</span><b>${nf(a.sapinieres.ha, 1)} ha</b></button>` : ''}
+        ${a.bois_landes && a.bois_landes.nb ? `<button class="ligne-culture" data-carte-code=""><span class="ms" aria-hidden="true" style="font-size:18px;color:#b07d4f;width:12px;margin:0 6px 0 -3px">nature</span><span class="nom">Bois et landes (hors PAC)</span><b>${nf(a.bois_landes.ha, 1)} ha</b></button>` : ''}
+        <p class="note" style="margin-bottom:0">Déclaration PAC ${esc(a.cultures_annee || '')} (Télépac). Touche une culture pour la voir en jaune sur la carte.${a.sapinieres && a.sapinieres.nb ? ' Les sapinières (carnet de plantations et contours de Hugo) ne sont pas dans la déclaration PAC : elles sont comptées à part. La « surface non exploitée » de la PAC, ce sont d\'autres parcelles, sans sapins.' : ''}${a.bois_landes && a.bois_landes.nb ? ' Le reste des terres de la famille hors PAC est surtout du bois et de la lande (lu sur la photo aérienne, à confirmer).' : ''}</p>
       </div>` : ''}
 
       <p class="note pied">${Object.keys(nomsAteliers).filter((k) => maj[k]).length ? `À jour : ${Object.keys(nomsAteliers).filter((k) => maj[k]).map((k) => `${esc(nomsAteliers[k])} ${esc(dateFr(maj[k], true))}`).join(' · ')}<br>` : ''}Ferme Denis · version ${esc(C.version)}</p>`;
@@ -1051,13 +1052,13 @@
         () => (ch ? ouvrirChamp(ch.parcelle_id) : allerOnglet('carte', { cible: { nom: p.parcelle } })), ref);
     });
     // Sapinières, terres du GAEC, propriétés : noms avec références cadastrales (ex. « H 1021 », « D 116 »)
-    const COUCHES_CHERCHEES = { sapinieres: ['forest', 'Sapinière'], terres_gaec: ['landscape', 'Terre du GAEC'], proprietes_famille: ['home_work', 'Propriété de la famille'] };
+    const COUCHES_CHERCHEES = { sapinieres: ['forest', 'Sapinière'], terres_gaec: ['landscape', 'Terre du GAEC'], proprietes_famille: ['home_work', 'Propriété de la famille'], bois_landes: ['nature', 'Bois ou lande, hors PAC'] };
     ((val(6) && val(6).features) || []).forEach((f) => {
       const p = f.properties || {};
       const c = COUCHES_CHERCHEES[p.couche];
       if (!c || !p.nom) return;
       ajouter('Sur la carte', c[0], majuscule(p.nom), [c[1], p.surface_m2 ? surfaceTexte(p.surface_m2) : '', p.statut === 'projet' ? 'projet' : ''].filter(Boolean).join(' · '),
-        `${p.couche} ${c[1]} cadastre sapin sapins ${String(p.nom).replace(/\s+/g, "")}`, () => allerOnglet('carte', { cible: { nom: p.nom, couche: p.couche } }));
+        `${p.couche} ${c[1]} cadastre sapin sapins${p.couche === 'bois_landes' ? ' bois lande friche talus jardin' : ''} ${String(p.nom).replace(/\s+/g, "")}`, () => allerOnglet('carte', { cible: { nom: p.nom, couche: p.couche } }));
     });
     lots.forEach((l) => {
       const fini = l.poids_moyen_kg != null;
@@ -1579,13 +1580,17 @@
   let rechercheChamp = '';
 
   async function vueChamps(el, options) {
-    const champs = await lire('champs');
+    const [champs, cult] = await Promise.all([lire('champs'), lire('cultures').catch(() => null)]);
     const annee = (champs[0] && champs[0].annee) || '';
     const parCulture = {};
     champs.forEach((c) => (c.cultures || []).forEach((k) => {
       const x = parCulture[k.code] = parCulture[k.code] || { code: k.code, culture: k.culture, ha: 0, champs: 0 };
       x.ha += Number(k.ha || 0); x.champs += 1;
     }));
+    // Total par culture : somme des parcelles PAC non arrondies (sinon 23 champs arrondis donnent 81,54 au lieu de 81,53, comme à l'accueil)
+    const exact = {};
+    ((cult && String(cult.annee) === String(annee) && cult.parcelles) || []).forEach((p) => { exact[p.code] = (exact[p.code] || 0) + Number(p.surface_ha || 0); });
+    Object.values(parCulture).forEach((g) => { if (exact[g.code] != null) g.ha = Math.round(exact[g.code] * 100) / 100; });
     const groupes = Object.values(parCulture).sort((a, b) => b.ha - a.ha);
     const total = groupes.reduce((s, g) => s + g.ha, 0);
 
@@ -1688,8 +1693,8 @@
   let carte = null;
   let calquesCouches = {};
   let marqueurPosition = null;
-  const couchesVisibles = { cultures_annee: true, en_terre: true, batiments: true, terres_gaec: false, champs_pac: false, proprietes_famille: false, sapinieres: true };
-  const ORDRE_COUCHES = ['cultures_annee', 'en_terre', 'batiments', 'terres_gaec', 'champs_pac', 'proprietes_famille', 'sapinieres'];
+  const couchesVisibles = { cultures_annee: true, en_terre: true, batiments: true, terres_gaec: false, champs_pac: false, proprietes_famille: false, bois_landes: true, sapinieres: true };
+  const ORDRE_COUCHES = ['cultures_annee', 'en_terre', 'batiments', 'terres_gaec', 'champs_pac', 'proprietes_famille', 'bois_landes', 'sapinieres'];
   // Couches dont chaque forme porte un code culture (couleur + mise en avant en jaune)
   const COUCHES_CULTURES = ['cultures_annee', 'en_terre'];
   // « En terre maintenant » : même couleurs que les cultures, bord blanc en pointillés pour la distinguer de la récolte déclarée
@@ -1782,6 +1787,7 @@
     const lignes = [`<b>${esc(majuscule(p.nom || p.couche_libelle))}</b>`, esc(p.couche_libelle)];
     if (p.culture) lignes.push('Culture ' + esc(p.annee) + ' : <b>' + esc(p.culture) + '</b>');
     if (p.surface_m2) lignes.push('Surface : ' + esc(surfaceTexte(p.surface_m2)));
+    if (p.couche === 'bois_landes') lignes.push('<span style="opacity:.75">Terre de la famille ou du GAEC, hors PAC. Bois, lande… lu sur la photo aérienne : à confirmer par la famille</span>');
     return lignes.join('<br>');
   }
 
