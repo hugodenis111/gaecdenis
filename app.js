@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.8
+/* Ferme Denis — appli famille (AGRIOS) — version 4.8.1
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -1428,7 +1428,7 @@
         <div class="puces">${GRAPH_INDICATEURS.map((g, i) => `<button class="puce${i === 0 ? ' actif' : ''}" data-graph="${g[0]}">${esc(g[1])}</button>`).join('')}</div>
         <div id="zone-graph"></div>
         <p class="doux" id="detail-graph" style="min-height:1.4em;margin:6px 0 0"></p>
-        <div class="legende-graph"><span><i style="background:var(--bleu)"></i>ce lot</span><span><i style="background:var(--gris-graph)"></i>lots ${esc(l.production || '')} d'avant</span><span><i class="pointilles"></i>moyenne d'avant</span></div>
+        <div class="legende-graph"><span><i style="background:var(--bleu)"></i>lot sélectionné</span><span><i style="background:var(--gris-graph)"></i>autres lots ${esc(l.production || '')}</span><span><i class="pointilles"></i>moyenne d'avant</span></div>
       </div>` : ''}
       ${blocDeparts}
       ${enCours ? '' : blocSuivi}
@@ -1492,20 +1492,31 @@
     }
 
     if (!enCours && serie.length > 1) {
+      let indiceSelectionne = serie.findIndex((x) => x.lot_id === l.lot_id);
       const dessinerGraph = (cle) => {
         const g = GRAPH_INDICATEURS.find((x) => x[0] === cle);
-        const points = serie.map((x) => ({ cle: x.lot_id, valeur: x[cle] == null ? null : Number(x[cle]), lot: x, accent: x.lot_id === l.lot_id }));
-        const precedentsVals = points.filter((p) => !p.accent && p.valeur !== null).map((p) => p.valeur);
+        const points = serie.map((lot) => ({ cle: lot.lot_id, valeur: lot[cle] == null ? null : Number(lot[cle]), lot }));
+        const precedentsVals = points.filter((p) => p.cle !== l.lot_id && p.valeur !== null).map((p) => p.valeur);
+        const decrire = (p) => `${batNom(p.lot.batiment)} · ${dateFr(p.lot.date_mep)} · ${p.valeur == null ? 'pas de chiffre' : nf(p.valeur, g[2]) + ' ' + g[3]}`;
         $('#zone-graph', el).innerHTML = graphSimple(points, {
-          dec: g[2], unite: g[3], accent: true,
+          dec: g[2], unite: g[3], decrire, indiceSelectionne,
           moyenne: precedentsVals.length ? precedentsVals.reduce((s, v) => s + v, 0) / precedentsVals.length : null,
           etiquette: (p) => { const d = String(p.lot.date_mep || ''); return d.slice(5, 7) + '/' + d.slice(2, 4); }
         });
-        $('#detail-graph', el).textContent = 'Touche une barre pour voir le lot.';
-        $$('#zone-graph [data-i]', el).forEach((z) => z.addEventListener('click', () => {
-          const p = points[Number(z.dataset.i)];
-          $('#detail-graph', el).textContent = `${batNom(p.lot.batiment)} · ${dateFr(p.lot.date_mep)} : ${p.valeur == null ? 'pas de chiffre' : nf(p.valeur, g[2]) + ' ' + g[3]}`;
-        }));
+        const detailGraph = $('#detail-graph', el);
+        const barres = $$('#zone-graph [data-i]', el);
+        detailGraph.textContent = barres.length ? decrire(points[indiceSelectionne]) : '';
+        const selectionner = (barre) => {
+          indiceSelectionne = Number(barre.dataset.i);
+          barres.forEach((b) => b.setAttribute('aria-pressed', String(b === barre)));
+          detailGraph.textContent = decrire(points[indiceSelectionne]);
+        };
+        barres.forEach((barre) => {
+          barre.addEventListener('click', () => selectionner(barre));
+          barre.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectionner(barre); }
+          });
+        });
       };
       $$('[data-graph]', el).forEach((b) => b.addEventListener('click', () => {
         $$('[data-graph]', el).forEach((x) => x.classList.toggle('actif', x === b));
@@ -1515,7 +1526,7 @@
     }
   }
 
-  // Graphique en barres simple : une série, barres arrondies, option « accent » sur un point, moyenne en pointillés.
+  // Une série de barres, avec sélection d'un lot et moyenne facultatives.
   function graphSimple(points, o) {
     const dec = o.dec || 0, unite = o.unite || '';
     const L = 340, H = 180, mg = { g: 34, d: 6, h: 22, b: 26 };
@@ -1532,7 +1543,7 @@
         ? `M${x0},${yb} V${yv + r} Q${x0},${yv} ${x0 + r},${yv} H${x0 + lb - r} Q${x0 + lb},${yv} ${x0 + lb},${yv + r} V${yb} Z`
         : `M${x0},${yb} V${yv - r} Q${x0},${yv} ${x0 + r},${yv} H${x0 + lb - r} Q${x0 + lb},${yv} ${x0 + lb},${yv - r} V${yb} Z`;
     };
-    let svg = `<svg class="graph" viewBox="0 0 ${L} ${H}" role="img">`;
+    let svg = `<svg class="graph" viewBox="0 0 ${L} ${H}" ${o.decrire ? 'role="group" aria-label="Historique des lots"' : 'role="img"'}>`;
     [0, 0.5, 1].forEach((t) => {
       const v = min + (haut - min) * t;
       svg += `<line class="grille" x1="${mg.g}" x2="${L - mg.d}" y1="${y(v)}" y2="${y(v)}"/><text x="${mg.g - 5}" y="${y(v) + 4}" text-anchor="end">${esc(nf(v, dec > 1 ? 1 : dec))}</text>`;
@@ -1541,9 +1552,10 @@
     let derniereEtiquette = null, derniereX = -1e9;
     points.forEach((p, i) => {
       const x0 = mg.g + i * pas + (pas - lb) / 2;
+      if (o.decrire) svg += `<g data-i="${i}" role="button" tabindex="0" aria-label="${esc(o.decrire(p))}" aria-pressed="${i === o.indiceSelectionne}">`;
       if (p.valeur !== null && p.valeur !== undefined) {
-        svg += `<path class="barre${o.accent ? (p.accent ? ' ce-lot' : '') : ' unique'}" d="${chemin(x0, p.valeur)}"><title>${esc(nf(p.valeur, dec))} ${esc(unite)}</title></path>`;
-        if (p.accent) svg += `<text class="valeur" x="${x0 + lb / 2}" y="${y(p.valeur) - 6}" text-anchor="middle">${esc(nf(p.valeur, dec))}</text>`;
+        svg += `<path class="barre${o.decrire ? '' : ' unique'}" d="${chemin(x0, p.valeur)}"><title>${esc(nf(p.valeur, dec))} ${esc(unite)}</title></path>`;
+        if (o.decrire) svg += `<text class="valeur" x="${x0 + lb / 2}" y="${y(p.valeur) - 6}" text-anchor="middle">${esc(nf(p.valeur, dec))}</text>`;
       }
       if (i % pasEtiquette === 0 || (i === points.length - 1 && i % pasEtiquette >= Math.ceil(pasEtiquette / 2))) {
         const texte = o.etiquette ? o.etiquette(p) : p.cle;
@@ -1554,7 +1566,8 @@
           derniereEtiquette = texte; derniereX = xt;
         }
       }
-      svg += `<rect data-i="${i}" x="${mg.g + i * pas}" y="${mg.h}" width="${pas}" height="${hauteur}" fill="transparent" style="cursor:pointer"/>`;
+      svg += `<rect ${o.decrire ? '' : `data-i="${i}"`} x="${mg.g + i * pas}" y="${mg.h}" width="${pas}" height="${hauteur}" fill="transparent" style="cursor:pointer"/>`;
+      if (o.decrire) svg += '</g>';
     });
     if (o.moyenne !== null && o.moyenne !== undefined) svg += `<line class="moyenne" x1="${mg.g}" x2="${L - mg.d}" y1="${y(o.moyenne)}" y2="${y(o.moyenne)}"/>`;
     return svg + '</svg>';

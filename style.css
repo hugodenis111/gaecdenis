@@ -172,9 +172,10 @@ thead th { border-top: 0; color: var(--texte-faible); font-weight: 600; font-siz
 .graph text { font-family: inherit; font-size: 12px; fill: var(--texte-doux); }
 .graph .valeur { fill: var(--texte); font-weight: 700; font-size: 12px; }
 .graph .grille { stroke: var(--bord); stroke-width: 1; }
-.graph .moyenne { stroke: var(--texte-doux); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.graph .moyenne { stroke: var(--texte-doux); stroke-width: 1.5; stroke-dasharray: 4 4; pointer-events: none; }
 .graph .barre { fill: var(--gris-graph); }
-.graph .barre.ce-lot { fill: var(--bleu); }
+.graph [aria-pressed="true"] .barre { fill: var(--bleu); }
+.graph [aria-pressed="false"] .valeur { display: none; }
 .graph .zone:hover + .barre, .graph .barre:hover { opacity: .8; }
 .legende-graph { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--texte-doux); margin-top: 6px; }
 .legende-graph i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
