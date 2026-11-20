@@ -1,5 +1,5 @@
 // Garde seulement les fichiers de l'appli (pas les données de la ferme) pour qu'elle s'ouvre vite.
-const CACHE = 'ferme-denis-v36';
+const CACHE = 'ferme-denis-v37';
 const FICHIERS = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'icon.svg', 'icon-512.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -15,7 +15,9 @@ self.addEventListener('fetch', (e) => {
   // Les données (Supabase) et les fonds de carte ne passent jamais par ce cache.
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // « no-cache » : on demande toujours au serveur si le fichier a changé (réponse très courte s'il n'a pas changé),
+    // pour que tout le monde ait la nouvelle version dès qu'elle est en ligne ; sans réseau, la copie gardée sert.
+    fetch(e.request, { cache: 'no-cache' })
       .then((r) => { const copie = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copie)); return r; })
       .catch(() => caches.match(e.request))
   );
