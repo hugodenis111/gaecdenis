@@ -523,3 +523,8 @@ details.replier table { margin-top: 6px; }
 #liste-vaches .coche .ms { font-size: 30px; color: var(--texte-faible); }
 #liste-vaches button.vue { background: var(--vert-clair); }
 #liste-vaches button.vue .coche .ms { color: var(--vert); font-variation-settings: "FILL" 1; }
+
+/* 4.9.3 : titres repliables assez hauts pour le doigt (44 px) */
+details.rubrique > summary { min-height: 44px; display: flex; align-items: center; }
+details.rubrique > summary h2 { flex: 1; }
+details > summary { min-height: 44px; }

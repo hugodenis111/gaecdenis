@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.9.2
+/* Ferme Denis — appli famille (AGRIOS) — version 4.9.3
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -807,6 +807,7 @@
     // Un vêlage noté dans le carnet compte, même si l'inventaire EDE la classe encore génisse
     const veleSelonCarnet = f.sexe === 'F' && f.categorie_ede !== 'VA' && h.some((x) => /^v[êe]lage/i.test(String(x.quoi)) && !/inventaire/i.test(String(x.source || '')));
     const etiquette = veleSelonCarnet ? 'Vache' : majuscule(MOT_TYPE[typeBete(f)]);
+    const nbCarnet = h.filter((x) => /^v[êe]lage/i.test(String(x.quoi)) && !/EDE|inventaire/i.test(String(x.source || ''))).length;
 
     el.innerHTML = `
       <div class="bloc fiche-tete">
@@ -815,7 +816,7 @@
         ${veleSelonCarnet ? '<p class="note" style="margin:8px 0 0">Un vêlage est noté dans le carnet, mais l\'inventaire EDE du 31/10 la classe encore « génisse ».</p>' : ''}
         <div class="chiffres" style="margin-top:12px">
           <div class="chiffre"><b>${esc(age(f.age_mois))}</b><span>âge</span></div>
-          ${chiffre(veaux.length, veaux.length > 1 ? 'veaux encore là' : 'veau encore là')}
+          ${veaux.length === 0 && veleSelonCarnet && nbCarnet > 0 ? chiffre(nbCarnet, nbCarnet > 1 ? 'vêlages notés au carnet, veau pas encore à l\'EDE' : 'vêlage noté au carnet, veau pas encore à l\'EDE') : chiffre(veaux.length, veaux.length > 1 ? 'veaux encore là' : 'veau encore là')}
           ${veauxPartis.length ? chiffre(nbVeaux, nbVeaux > 1 ? 'veaux connus' : 'veau connu') : ''}
         </div>
       </div>
@@ -979,9 +980,9 @@
     ['Tous les papiers', 'folder_open', 'papier papiers document documents facture factures photo photos pdf contrat assurance', () => ouvrir(PAGES.documents[0], PAGES.documents[1])],
     ['Bâtiments', 'home_work', 'batiment batiments poulailler porcherie etable hangar maison', () => ouvrir(PAGES.batiments[0], PAGES.batiments[1])],
     ['Carte de la ferme', 'map', 'carte plan terres photo aerienne', () => allerOnglet('carte')],
-    ['Troupeau', 'pets', 'troupeau vaches vache genisse genisses veau veaux taureau taureaux bovins', () => allerOnglet('vaches')],
+    ['Troupeau', 'pets', 'troupeau vaches vache genisse genisses veau veaux taureau taureaux bovins velage velages naissance naissances', () => allerOnglet('vaches')],
     ['Bêtes parties (ventes, boucherie, morts)', 'logout', 'parties partis sorties sortie ventes vente vendues vendus boucherie mortes morts equarrissage historique ede', () => allerOnglet('vaches', { sorties: true })],
-    ['Volailles', 'egg_alt', 'volailles poulets poulet lots lot poulailler marge ic mortalite', () => allerOnglet('volailles')],
+    ['Volailles', 'egg_alt', 'volailles poulets poulet lots lot poulailler marge ic mortalite eau aliment poids temperature suivi', () => allerOnglet('volailles')],
     ['Infos notées par la famille', 'edit_note', 'infos notes noter remarque remarques', () => ouvrir(PAGES.ajouts[0], PAGES.ajouts[1])],
     ['À faire (liste de la famille)', 'checklist', 'a faire liste taches tache travaux boulot todo', () => ouvrir(PAGES.a_faire[0], PAGES.a_faire[1])],
     ['Travail des assistants (Claude, GPT)', 'smart_toy', 'assistants claude gpt ia taches en cours ateliers', () => ouvrir(PAGES.taches[0], PAGES.taches[1])],
@@ -1097,7 +1098,8 @@
       // un numéro de bête en cours de frappe (« 04 » pour 0412) reste trouvé.
       const motTrouve = (x, m) => (/^\d{1,3}$/.test(m)
         ? new RegExp('(^|\\D)' + m + '(\\D|$)').test(x.texte) || (x.numero && x.numero.startsWith(m))
-        : x.texte.includes(m));
+        // Mot court (« eau », « sci », « ic ») : au début d'un mot, sinon « eau » trouve « veau » et « taureau »
+        : m.length <= 3 ? new RegExp('(^|[^a-z0-9])' + m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(x.texte) : x.texte.includes(m));
       const trouves = index.filter((x) => mots.every((m) => motTrouve(x, m))).map((x) => {
         let score = 1;
         if (qNum && x.numero) score = x.numero === qNum ? 100 : x.numero.startsWith(qNum) ? 50 : x.numero.includes(qNum) ? 30 : 5;
@@ -2450,10 +2452,19 @@
 
   // Feuille qui monte du bas de l'écran (détail d'un document, ajout d'un document)
   // o.avantFermer() → false pour garder la feuille ouverte ; o.apresFermer() après fermeture
+  let derniereFeuille = 0;
   function feuille(html, o) {
     o = o || {};
+    // Double appui rapide sur un bouton (avant que la première feuille couvre l'écran) : on garde une seule feuille
+    if (Date.now() - derniereFeuille < 700 && document.querySelector('.feuille-fond[data-etat="ouverte"]')) {
+      const horsEcran = document.createElement('div');
+      horsEcran.innerHTML = `<div class="feuille">${html}</div>`;
+      return { el: horsEcran.firstChild, fermer: () => {} };
+    }
+    derniereFeuille = Date.now();
     const fond = document.createElement('div');
     fond.className = 'feuille-fond';
+    fond.dataset.etat = 'ouverte';
     fond.innerHTML = `<div class="feuille" role="dialog" aria-modal="true"><div class="poignee"></div><button class="feuille-fermer" aria-label="Fermer">${icone('close')}</button>${html}</div>`;
     document.body.appendChild(fond);
     document.body.classList.add('sans-defilement');
@@ -2461,6 +2472,7 @@
     const fermer = () => {
       if (o.avantFermer && o.avantFermer() === false) return;
       fond.classList.remove('ouvert');
+      delete fond.dataset.etat;
       document.body.classList.remove('sans-defilement');
       setTimeout(() => fond.remove(), 220);
       if (o.apresFermer) o.apresFermer();
