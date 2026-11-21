@@ -1,4 +1,4 @@
-/* Ferme Denis — appli famille (AGRIOS) — version 4.9.3
+/* Ferme Denis — appli famille (AGRIOS) — version 4.9.4
  * Lecture des données de la ferme + discussion avec l'IA + ajout d'infos confirmées.
  * Toutes les données passent par la fonction Supabase public.famille_lire (membres de la famille seulement).
  */
@@ -816,7 +816,7 @@
         ${veleSelonCarnet ? '<p class="note" style="margin:8px 0 0">Un vêlage est noté dans le carnet, mais l\'inventaire EDE du 31/10 la classe encore « génisse ».</p>' : ''}
         <div class="chiffres" style="margin-top:12px">
           <div class="chiffre"><b>${esc(age(f.age_mois))}</b><span>âge</span></div>
-          ${veaux.length === 0 && veleSelonCarnet && nbCarnet > 0 ? chiffre(nbCarnet, nbCarnet > 1 ? 'vêlages notés au carnet, veau pas encore à l\'EDE' : 'vêlage noté au carnet, veau pas encore à l\'EDE') : chiffre(veaux.length, veaux.length > 1 ? 'veaux encore là' : 'veau encore là')}
+          ${veaux.length === 0 && veauxPartis.length === 0 && veleSelonCarnet && nbCarnet > 0 ? chiffre(nbCarnet, nbCarnet > 1 ? 'vêlages notés au carnet, veau pas encore dans nos données EDE' : 'vêlage noté au carnet, veau pas encore dans nos données EDE') : chiffre(veaux.length, veaux.length > 1 ? 'veaux encore là' : 'veau encore là')}
           ${veauxPartis.length ? chiffre(nbVeaux, nbVeaux > 1 ? 'veaux connus' : 'veau connu') : ''}
         </div>
       </div>
@@ -1250,8 +1250,9 @@
     const lu = luLe(x, detail);
     return !!lu && jour >= lu.slice(0, 10);
   };
-  const ecartPct = (v, ref) => (v == null || !ref ? null : Math.round(((Number(v) - Number(ref)) / Number(ref)) * 100));
-  const texteEcart = (p) => (p === null ? '' : p === 0 ? 'comme d\'habitude' : (p > 0 ? '+' : '−') + Math.abs(p) + ' %');
+  // Écart exact (les seuils d'alerte −30 %, ±15 %… se comparent à lui) ; arrondi seulement pour l'affichage
+  const ecartPct = (v, ref) => (v == null || !ref ? null : ((Number(v) - Number(ref)) / Number(ref)) * 100);
+  const texteEcart = (p) => { if (p === null) return ''; const r = Math.round(p); return r === 0 ? 'comme d\'habitude' : (r > 0 ? '+' : '−') + Math.abs(r) + ' %'; };
   function suiviLot(l, detail) {
     const rel = ((detail && detail.releves) || []).map((x) => Object.assign({}, x, { j: Number(x.j) }));
     if (!rel.length) return null;
@@ -2452,34 +2453,62 @@
 
   // Feuille qui monte du bas de l'écran (détail d'un document, ajout d'un document)
   // o.avantFermer() → false pour garder la feuille ouverte ; o.apresFermer() après fermeture
-  let derniereFeuille = 0;
+  // Endroit du dernier appui (doigt, souris, Entrée) dans l'appli
+  let dernierAppuiSur = null;
+  document.addEventListener('click', (e) => { dernierAppuiSur = e.target; }, true);
   function feuille(html, o) {
     o = o || {};
-    // Double appui rapide sur un bouton (avant que la première feuille couvre l'écran) : on garde une seule feuille
-    if (Date.now() - derniereFeuille < 700 && document.querySelector('.feuille-fond[data-etat="ouverte"]')) {
+    // Une feuille est déjà ouverte et l'appui qui demande celle-ci n'a pas eu lieu DANS cette feuille
+    // (double appui, réponse du réseau qui arrive tard) : on n'en empile pas une deuxième.
+    const ouvertes = [...document.querySelectorAll('.feuille-fond[data-etat="ouverte"]')];
+    const dessus = ouvertes[ouvertes.length - 1];
+    if (dessus && !(dernierAppuiSur && dessus.contains(dernierAppuiSur))) {
       const horsEcran = document.createElement('div');
       horsEcran.innerHTML = `<div class="feuille">${html}</div>`;
-      return { el: horsEcran.firstChild, fermer: () => {} };
+      return { el: horsEcran.firstChild, fermer: () => {}, annulee: true };
     }
-    derniereFeuille = Date.now();
+    const avant = document.activeElement;
+    const ouverteLe = Date.now();
     const fond = document.createElement('div');
     fond.className = 'feuille-fond';
     fond.dataset.etat = 'ouverte';
-    fond.innerHTML = `<div class="feuille" role="dialog" aria-modal="true"><div class="poignee"></div><button class="feuille-fermer" aria-label="Fermer">${icone('close')}</button>${html}</div>`;
+    fond.dataset.ouverteLe = String(ouverteLe);
+    fond.innerHTML = `<div class="feuille" role="dialog" aria-modal="true" tabindex="-1"><div class="poignee"></div><button class="feuille-fermer" aria-label="Fermer">${icone('close')}</button>${html}</div>`;
     document.body.appendChild(fond);
+    const el = $('.feuille', fond);
     document.body.classList.add('sans-defilement');
+    // Le curseur va sur la feuille elle-même (pas sur un champ : le clavier du téléphone ne s'ouvre pas tout seul)
+    try { el.focus({ preventScroll: true }); } catch (e) { /* rien */ }
+    // Nom de la fenêtre pour les lecteurs d'écran : son titre, une fois le contenu rempli par l'appelant
+    queueMicrotask(() => { const t = $('.feuille-titre', el); if (t) { t.id = t.id || 'feuille-titre-' + ouverteLe; el.setAttribute('aria-labelledby', t.id); } });
     requestAnimationFrame(() => fond.classList.add('ouvert'));
+    const clavier = (e) => {
+      const toutes = [...document.querySelectorAll('.feuille-fond[data-etat="ouverte"]')];
+      if (toutes[toutes.length - 1] !== fond) return; // seulement la feuille du dessus
+      if (e.key === 'Escape') { e.preventDefault(); fermer(); return; }
+      if (e.key === 'Tab') { // Tab reste dans la feuille
+        const f = [...el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+        if (!f.length) { e.preventDefault(); return; }
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+      }
+    };
+    document.addEventListener('keydown', clavier);
     const fermer = () => {
       if (o.avantFermer && o.avantFermer() === false) return;
+      document.removeEventListener('keydown', clavier);
       fond.classList.remove('ouvert');
       delete fond.dataset.etat;
-      document.body.classList.remove('sans-defilement');
+      if (!document.querySelector('.feuille-fond[data-etat="ouverte"]')) document.body.classList.remove('sans-defilement');
       setTimeout(() => fond.remove(), 220);
+      try { if (avant && avant.focus && document.contains(avant)) avant.focus({ preventScroll: true }); } catch (e) { /* rien */ }
       if (o.apresFermer) o.apresFermer();
     };
-    fond.addEventListener('click', (e) => { if (e.target === fond) fermer(); });
+    // Appui sur le fond, hors de la feuille : ferme, sauf juste après l'ouverture (2e appui d'un double appui)
+    fond.addEventListener('click', (e) => { if (e.target === fond && Date.now() - ouverteLe > 400) fermer(); });
     $('.feuille-fermer', fond).addEventListener('click', fermer);
-    return { el: $('.feuille', fond), fermer };
+    return { el, fermer };
   }
 
   // =====================================================================
@@ -3123,4 +3152,20 @@
   })();
 
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Une appli restée ouverte (téléphone en veille) garde l'ancien code : au retour, on regarde si une version plus récente est en ligne
+  let dernierControleVersion = Date.now();
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !navigator.onLine || Date.now() - dernierControleVersion < 10 * 60 * 1000 || $('#bandeau-maj')) return;
+    dernierControleVersion = Date.now();
+    try {
+      const t = await (await fetch('config.js', { cache: 'no-cache' })).text();
+      const v = (t.match(/version:\s*"([^"]+)"/) || [])[1];
+      if (!v || v === C.version) return;
+      const b = document.createElement('button');
+      b.id = 'bandeau-maj'; b.type = 'button'; b.className = 'bandeau-maj';
+      b.innerHTML = `${icone('system_update')}<span>Nouvelle version de l'appli : touche ici pour la charger</span>`;
+      b.addEventListener('click', () => location.reload());
+      document.body.appendChild(b);
+    } catch (e) { /* pas de réseau : on réessaiera au prochain retour */ }
+  });
 })();

@@ -528,3 +528,10 @@ details.replier table { margin-top: 6px; }
 details.rubrique > summary { min-height: 44px; display: flex; align-items: center; }
 details.rubrique > summary h2 { flex: 1; }
 details > summary { min-height: 44px; }
+
+/* 4.9.4 : bandeau « nouvelle version », au-dessus de la barre du bas */
+.bandeau-maj { position: fixed; left: 12px; right: 12px; bottom: calc(var(--bas) + env(safe-area-inset-bottom) + 12px); z-index: 2500;
+  display: flex; gap: 10px; align-items: center; min-height: 48px; padding: 12px 14px; border: 0; border-radius: 14px;
+  background: var(--vert); color: #0b140d; font: inherit; font-weight: 600; text-align: left; box-shadow: 0 6px 20px rgba(0,0,0,.35); cursor: pointer; }
+.bandeau-maj .ms { flex: none; }
+.feuille:focus { outline: none; }
